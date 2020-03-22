@@ -122,7 +122,7 @@ extern int count;          //to generally count ticks, loops, etc
  * We use this technique to switch sidebands. This is to avoid placing the lsbCarrier close to
  * 11 MHz where its fifth harmonic beats with the arduino's 16 Mhz oscillator's fourth harmonic
  */
-
+#define VU3GWN_VER "VU3GWN v1"
 #define INIT_USB_FREQ   (11059200l)
 // limits the tuning and working range of the ubitx between 3 MHz and 30 MHz
 #define LOWEST_FREQ   (100000l)
@@ -183,6 +183,7 @@ void ritDisable();
 void checkCAT();
 void cwKeyer(void);
 void switchVFO(int vfoSelect);
+void displayVersion() ;
 
 int enc_read(void); // returns the number of ticks in a short interval, +ve in clockwise, -ve in anti-clockwise
 int btnDown(); //returns true if the encoder button is pressed

@@ -46,7 +46,7 @@ void scaleTouch(struct Point *p);
 #define DISPLAY_GREENYELLOW 0xAFE5  ///< 173, 255,  41
 #define DISPLAY_PINK        0xFC18  ///< 255, 130, 198
 
-#define TEXT_LINE_HEIGHT 18
+#define TEXT_LINE_HEIGHT 16 //18 //GPB.20200322A
 #define TEXT_LINE_INDENT 5
 
 #define BUTTON_PUSH
@@ -427,5 +427,3 @@ const GFXfont ubitx_font PROGMEM = {
 #define DISPLAY_PINK        0xFC18  ///< 255, 130, 198
 
 #endif // _NANO_GUI_H_
-
-

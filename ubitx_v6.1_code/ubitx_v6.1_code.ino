@@ -453,7 +453,7 @@ void startTx(byte txMode){
     digitalWrite(TX_RX, 1);     
   }
   drawTx();
-  //updateDisplay();
+  //updateDisplay(); //GPB.20200322A //Un-Commented
 }
 
 void stopTx(){
@@ -548,9 +548,11 @@ void checkButton(){
     downTime++;
     if (downTime > 300){
       doSetup2();
+      displayVersion() ;
       return;
     }
  }
+ 
  active_delay(100);
 
  
@@ -814,8 +816,10 @@ void setup()
     setupBFO();
   }
   guiUpdate();
-  displayRawText("v6.1", 270, 210, DISPLAY_LIGHTGREY, DISPLAY_NAVY);
+  displayVersion() ;
 }
+
+
 
 
 /**

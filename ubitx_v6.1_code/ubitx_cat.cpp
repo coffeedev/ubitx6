@@ -15,13 +15,13 @@
 
 static unsigned long rxBufferArriveTime = 0;
 static byte rxBufferCheckCount = 0;
-#define CAT_RECEIVE_TIMEOUT 500
+#define CAT_RECEIVE_TIMEOUT 2500 //GPB.20200322A //Changed from 500
 static byte cat[5]; 
 static byte insideCat = 0; 
 static byte useOpenRadioControl = 0;
 
 //for broken protocol
-#define CAT_RECEIVE_TIMEOUT 500
+#define CAT_RECEIVE_TIMEOUT 2500 //GPB.20200322A //Changed from 500
 
 #define CAT_MODE_LSB            0x00
 #define CAT_MODE_USB            0x01
@@ -453,5 +453,3 @@ void checkCAT(){
   processCATCommand2(cat);
   insideCat = 0;
 }
-
-

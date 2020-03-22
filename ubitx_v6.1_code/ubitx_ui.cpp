@@ -23,8 +23,8 @@ struct Button {
 #define MAX_BUTTONS 17
 const struct Button btn_set[MAX_BUTTONS] PROGMEM = { 
 //const struct Button  btn_set [] = {
-  {0, 10, 159, 36,  "VFOA", "A"},
-  {160, 10, 159, 36, "VFOB", "B"},
+  {0, 5, 159, 31,  "VFOA", "A"},
+  {160, 5, 159, 31, "VFOB", "B"},
   
   {0, 80, 60, 36,  "RIT", "R"},
   {64, 80, 60, 36, "USB", "U"},
@@ -40,9 +40,9 @@ const struct Button btn_set[MAX_BUTTONS] PROGMEM = {
 
   {0, 160, 60, 36, "15", "5"},
   {64, 160, 60, 36, "10", "1"},
-  {128, 160, 60, 36, "WPM", "W"},
-  {192, 160, 60, 36, "TON", "T"},
-  {256, 160, 60, 36, "FRQ", "F"},
+  {128, 160, 60, 36, "W/M", "W"},
+  {192, 160, 60, 36, "TN", "T"},
+  {256, 160, 60, 36, "FQ", "F"},
 };
 
 #define MAX_KEYS 17
@@ -104,8 +104,13 @@ void formatFreq(long f, char *buff) {
 }
 
 void drawCommandbar(char *text){
-  displayFillrect(30,45,280, 32, DISPLAY_NAVY);
-  displayRawText(text, 30, 45, DISPLAY_WHITE, DISPLAY_NAVY);
+  displayFillrect(60, 40, 280, 32, DISPLAY_NAVY);
+  displayRawText(text, 60, 45, DISPLAY_WHITE, DISPLAY_NAVY);
+}
+
+void displayVersion()
+{
+  displayRawText(VU3GWN_VER, 180, 210, DISPLAY_LIGHTGREY, DISPLAY_NAVY);
 }
 
 /** A generic control to read variable values
@@ -160,7 +165,7 @@ void printCarrierFreq(unsigned long freq){
   strncat(c, &b[2], 3);
   strcat(c, ".");
   strncat(c, &b[5], 1);
-  displayText(c, 110, 100, 100, 30, DISPLAY_CYAN, DISPLAY_NAVY, DISPLAY_NAVY);
+  displayText(c, 110, 100, 100, 30, DISPLAY_YELLOW, DISPLAY_NAVY, DISPLAY_NAVY);
 }
 
 void displayDialog(char *title, char *instructions){
@@ -218,7 +223,7 @@ void displayVFO(int vfo){
       displayColor = DISPLAY_WHITE;
       displayBorder = DISPLAY_WHITE;
     } else {
-      displayColor = DISPLAY_GREEN;
+      displayColor = DISPLAY_GREENYELLOW;
       displayBorder = DISPLAY_BLACK;
       formatFreq(vfoB, c+2);
     }
@@ -303,13 +308,13 @@ void fastTune(){
     active_delay(50);
   active_delay(300);
   
-  displayRawText("Fast tune", 100, 55, DISPLAY_CYAN, DISPLAY_NAVY);
+  displayRawText("Fast Tuning mode", 60, 45, DISPLAY_YELLOW, DISPLAY_NAVY);
   while(1){
     checkCAT();
 
     //exit after debouncing the btnDown
     if (btnDown()){
-      displayFillrect(100, 55, 120, 30, DISPLAY_NAVY);
+      displayFillrect(50, 45, 220, 30, DISPLAY_NAVY);
 
       //wait until the button is realsed and then return
       while(btnDown())
@@ -406,26 +411,29 @@ void enterFreq(){
 
 void drawCWStatus(){
   displayFillrect(0, 201, 320, 39, DISPLAY_NAVY);
-  strcpy(b, " cw:");
+  strcpy(b, " CW:");
   int wpm = 1200/cwSpeed;    
   itoa(wpm,c, 10);
   strcat(b, c);
-  strcat(b, "wpm, ");
-  itoa(sideTone, c, 10);
-  strcat(b, c);
-  strcat(b, "hz");
-  displayRawText(b, 0, 210, DISPLAY_CYAN, DISPLAY_NAVY);  
+  strcat(b, " w/m");
+  //strcat(b, "wpm, ");
+  //itoa(sideTone, c, 10);
+  //strcat(b, c);
+  //strcat(b, "hz");
+  displayRawText(b, 0, 210, DISPLAY_YELLOW, DISPLAY_NAVY);  
 }
 
 
 void drawTx(){
   if (inTx)
-    displayText("TX", 280, 48, 37, 28, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_BLUE);  
+    displayText("TX", 250, 42, 37, 28, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_BLUE);  
   else
-    displayFillrect(280, 48, 37, 28, DISPLAY_NAVY);
+    //displayText("RX", 250, 42, 37, 28, DISPLAY_BLACK, DISPLAY_GREEN, DISPLAY_BLUE);
+    displayFillrect(250, 42, 37, 28, DISPLAY_NAVY);
 }
 void drawStatusbar(){
   drawCWStatus();
+  displayVersion() ;
 }
 
 void guiUpdate(){
@@ -752,11 +760,11 @@ void doCommand(struct Button *b){
     switchBand(24800000l);
   else if (!strcmp(b->text, "10"))
     switchBand(28000000l);  
-  else if (!strcmp(b->text, "FRQ"))
+  else if (!strcmp(b->text, "FQ"))
     enterFreq();
-  else if (!strcmp(b->text, "WPM"))
+  else if (!strcmp(b->text, "W/M"))
     setCwSpeed();
-  else if (!strcmp(b->text, "TON"))
+  else if (!strcmp(b->text, "TN"))
     setCwTone();
 }
 
@@ -867,4 +875,3 @@ void doCommands(){
 
   checkCAT();
 }
-
