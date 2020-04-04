@@ -15,13 +15,13 @@
 
 static unsigned long rxBufferArriveTime = 0;
 static byte rxBufferCheckCount = 0;
-#define CAT_RECEIVE_TIMEOUT 2500 //GPB.20200322A //Changed from 500
+#define CAT_RECEIVE_TIMEOUT 5000 //GPB.20200322A //Changed from 500
 static byte cat[5]; 
 static byte insideCat = 0; 
 static byte useOpenRadioControl = 0;
 
 //for broken protocol
-#define CAT_RECEIVE_TIMEOUT 2500 //GPB.20200322A //Changed from 500
+#define CAT_RECEIVE_TIMEOUT 5000 //GPB.20200322A //Changed from 500
 
 #define CAT_MODE_LSB            0x00
 #define CAT_MODE_USB            0x01
@@ -399,6 +399,11 @@ int catCount = 0;
 void checkCAT(){
   byte i;
 
+  //this code is not re-entrant.
+  if (insideCat == 1)
+    return;
+  insideCat = 1;
+
   //Check Serial Port Buffer
   if (Serial.available() == 0) {      //Set Buffer Clear status
     rxBufferCheckCount = 0;
@@ -408,6 +413,7 @@ void checkCAT(){
     if (rxBufferCheckCount == 0){
       rxBufferCheckCount = Serial.available();
       rxBufferArriveTime = millis() + CAT_RECEIVE_TIMEOUT;  //Set time for timeout
+      
     }
     else if (rxBufferArriveTime < millis()){                //Clear Buffer
       for (i = 0; i < Serial.available(); i++)
@@ -425,12 +431,7 @@ void checkCAT(){
   //Arived CAT DATA
   for (i = 0; i < 5; i++)
     cat[i] = Serial.read();
-
-
-  //this code is not re-entrant.
-  if (insideCat == 1)
-    return;
-  insideCat = 1;
+ 
 
 /**
  *  This routine is enabled to debug the cat protocol
@@ -444,12 +445,12 @@ void checkCAT(){
   }
 */  
 
-/*
   if (!doingCAT){
     doingCAT = 1;
-    displayText("CAT on", 100,120,100,40, ILI9341_ORANGE, ILI9341_BLACK, ILI9341_WHITE);
+    //displayText("CAT on", 100,120,100,40, ILI9341_ORANGE, ILI9341_BLACK, ILI9341_WHITE);
+    displayText("CAT on", 100,120,100,40, DISPLAY_ORANGE, DISPLAY_BLACK, DISPLAY_WHITE); //GPB. 20200329A
   }
-*/
+
   processCATCommand2(cat);
   insideCat = 0;
 }
