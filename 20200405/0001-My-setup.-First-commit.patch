@@ -1,0 +1,4498 @@
+From ecdaece43bcc85a3435dd02c4dd7389a0a72cacf Mon Sep 17 00:00:00 2001
+From: "nova.web@live.com" <2718WerJkl##>
+Date: Sat, 21 Mar 2020 14:08:42 +0530
+Subject: [PATCH 1/4] My setup. First commit
+
+---
+ ubitx_v6.1_code/README.md           |   9 +
+ ubitx_v6.1_code/encoder.cpp         | 123 ++++
+ ubitx_v6.1_code/keyer.cpp           | 292 ++++++++++
+ ubitx_v6.1_code/morse.cpp           | 115 ++++
+ ubitx_v6.1_code/morse.h             |   3 +
+ ubitx_v6.1_code/nano_gui.cpp        | 582 +++++++++++++++++++
+ ubitx_v6.1_code/nano_gui.h          | 431 ++++++++++++++
+ ubitx_v6.1_code/setup.cpp           | 304 ++++++++++
+ ubitx_v6.1_code/ubitx.h             | 222 +++++++
+ ubitx_v6.1_code/ubitx_cat.cpp       | 457 +++++++++++++++
+ ubitx_v6.1_code/ubitx_si5351.cpp    | 129 +++++
+ ubitx_v6.1_code/ubitx_ui.cpp        | 870 ++++++++++++++++++++++++++++
+ ubitx_v6.1_code/ubitx_v6.1_code.ino | 846 +++++++++++++++++++++++++++
+ 13 files changed, 4383 insertions(+)
+ create mode 100644 ubitx_v6.1_code/README.md
+ create mode 100644 ubitx_v6.1_code/encoder.cpp
+ create mode 100644 ubitx_v6.1_code/keyer.cpp
+ create mode 100644 ubitx_v6.1_code/morse.cpp
+ create mode 100644 ubitx_v6.1_code/morse.h
+ create mode 100644 ubitx_v6.1_code/nano_gui.cpp
+ create mode 100644 ubitx_v6.1_code/nano_gui.h
+ create mode 100644 ubitx_v6.1_code/setup.cpp
+ create mode 100644 ubitx_v6.1_code/ubitx.h
+ create mode 100644 ubitx_v6.1_code/ubitx_cat.cpp
+ create mode 100644 ubitx_v6.1_code/ubitx_si5351.cpp
+ create mode 100644 ubitx_v6.1_code/ubitx_ui.cpp
+ create mode 100644 ubitx_v6.1_code/ubitx_v6.1_code.ino
+
+diff --git a/ubitx_v6.1_code/README.md b/ubitx_v6.1_code/README.md
+new file mode 100644
+index 0000000..8b7e7e9
+--- /dev/null
++++ b/ubitx_v6.1_code/README.md
+@@ -0,0 +1,9 @@
++# ubitxv6
++uBitx v6.3.1 Arduino sketch
++IMPORTANT: It will compile only if you place this in the Arduino's own sketch directory! This is because of the restricted places that the Arduino searches for it's include files (the headers).
++
++- This is refactored to remove dependencies on any library except the standard Arduino libraries of SPI, I2C, EEPROM, etc.
++- This works with ILI9341 display controller. The pins used by the TFT display are the same as that of the 16x2 LCD display of the previous versions.
++- As the files are now split into .cpp files, the nano gui, morse reader, etc. can be reused in other projects as well
++
++This is released under GPL v3 license.
+diff --git a/ubitx_v6.1_code/encoder.cpp b/ubitx_v6.1_code/encoder.cpp
+new file mode 100644
+index 0000000..73b8c2f
+--- /dev/null
++++ b/ubitx_v6.1_code/encoder.cpp
+@@ -0,0 +1,123 @@
++#include <Arduino.h>
++#include <stdint.h>
++#include "ubitx.h"//Pin definitions
++
++//Normal encoder state
++uint8_t prev_enc = 0;
++int8_t enc_count = 0;
++
++//Momentum encoder state
++int16_t enc_count_periodic = 0;
++int8_t momentum[3] = {0};
++static const uint16_t CALLBACK_PERIOD_MS = 200;
++static const uint8_t MOMENTUM_MULTIPLIER = 1;
++
++uint8_t enc_state (void)
++{
++  return (digitalRead(ENC_A)?1:0 + digitalRead(ENC_B)?2:0);
++}
++
++/*
++ * SmittyHalibut's encoder handling, using interrupts. Should be quicker, smoother handling.
++ * The Interrupt Service Routine for Pin Change Interrupts on A0-A5.
++ */
++ISR (PCINT1_vect)
++{
++  uint8_t cur_enc = enc_state();
++  if (prev_enc == cur_enc) {
++    //Serial.println("unnecessary ISR");
++    return;
++  }
++  //Serial.print(prev_enc);
++  //Serial.println(cur_enc);
++  
++  //these transitions point to the enccoder being rotated anti-clockwise
++  if ((prev_enc == 0 && cur_enc == 2) || 
++      (prev_enc == 2 && cur_enc == 3) || 
++      (prev_enc == 3 && cur_enc == 1) || 
++      (prev_enc == 1 && cur_enc == 0))
++  {
++    enc_count -= 1;
++    enc_count_periodic -= 1;
++  }
++  //these transitions point to the enccoder being rotated clockwise
++  else if ((prev_enc == 0 && cur_enc == 1) || 
++      (prev_enc == 1 && cur_enc == 3) || 
++      (prev_enc == 3 && cur_enc == 2) || 
++      (prev_enc == 2 && cur_enc == 0))
++  {
++    enc_count += 1;
++    enc_count_periodic += 1;
++  }
++  else {
++    // A change to two states, we can't tell whether it was forward or backward, so we skip it.
++    //Serial.println("skip");
++  }
++  prev_enc = cur_enc; // Record state for next pulse interpretation
++}
++
++/*
++ * Setup the encoder interrupts and global variables.
++ */
++void pci_setup(byte pin) {
++  *digitalPinToPCMSK(pin) |= bit (digitalPinToPCMSKbit(pin));  // enable pin
++  PCIFR  |= bit (digitalPinToPCICRbit(pin)); // clear any outstanding interrupt
++  PCICR  |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
++}
++
++void enc_setup(void)
++{
++  enc_count = 0;
++  // This is already done in setup() ?
++  //pinMode(ENC_A, INPUT);
++  //pinMode(ENC_B, INPUT);
++  prev_enc = enc_state();
++
++  // Setup Pin Change Interrupts for the encoder inputs
++  pci_setup(ENC_A);
++  pci_setup(ENC_B);
++
++  //Set up timer interrupt for momentum
++  TCCR1A = 0;//"normal" mode
++  TCCR1B = 3;//clock divider of 64
++  TCNT1  = 0;//start counting at 0
++  OCR1A  = F_CPU * CALLBACK_PERIOD_MS / 1000 / 64;//set target number
++  TIMSK1 |= (1 << OCIE1A);//enable interrupt
++}
++
++ISR(TIMER1_COMPA_vect)
++{
++  momentum[2] = momentum[1];
++  momentum[1] = momentum[0];
++  momentum[0] = enc_count_periodic;
++  enc_count_periodic = 0;
++}
++
++int8_t min_momentum_mag()
++{
++  int8_t min_mag = 127;
++  for(uint8_t i = 0; i < sizeof(momentum)/sizeof(momentum[0]); ++i){
++    int8_t mag = abs(momentum[i]);
++    if(mag < min_mag){
++      min_mag = mag;
++    }
++  }
++  return min_mag;
++}
++
++int enc_read(void) {
++  if(0 != enc_count){
++    int16_t ret = enc_count;
++    int8_t s = (enc_count < 0) ? -1 : 1;
++    int8_t momentum_mag = min_momentum_mag();
++    if(momentum_mag >= 20){
++      ret += s*40;
++    }
++    else if(momentum_mag >= 5){
++      ret += s*(20 + momentum_mag)/(20 - momentum_mag);
++    }
++    enc_count = 0;
++    return ret;
++  }
++  return 0;
++}
+diff --git a/ubitx_v6.1_code/keyer.cpp b/ubitx_v6.1_code/keyer.cpp
+new file mode 100644
+index 0000000..aa4fdc2
+--- /dev/null
++++ b/ubitx_v6.1_code/keyer.cpp
+@@ -0,0 +1,292 @@
++#include <Arduino.h>
++#include "ubitx.h"
++
++/**
++ CW Keyer
++ CW Key logic change with ron's code (ubitx_keyer.cpp)
++ Ron's logic has been modified to work with the original uBITX by KD8CEC
++
++ Original Comment ----------------------------------------------------------------------------
++ * The CW keyer handles either a straight key or an iambic / paddle key.
++ * They all use just one analog input line. This is how it works.
++ * The analog line has the internal pull-up resistor enabled. 
++ * When a straight key is connected, it shorts the pull-up resistor, analog input is 0 volts
++ * When a paddle is connected, the dot and the dash are connected to the analog pin through
++ * a 10K and a 2.2K resistors. These produce a 4v and a 2v input to the analog pins.
++ * So, the readings are as follows :
++ * 0v - straight key
++ * 1-2.5 v - paddle dot
++ * 2.5 to 4.5 v - paddle dash
++ * 2.0 to 0.5 v - dot and dash pressed
++ * 
++ * The keyer is written to transparently handle all these cases
++ * 
++ * Generating CW
++ * The CW is cleanly generated by unbalancing the front-end mixer
++ * and putting the local oscillator directly at the CW transmit frequency.
++ * The sidetone, generated by the Arduino is injected into the volume control
++ */
++
++ //CW ADC Range
++int cwAdcSTFrom = 0;
++int cwAdcSTTo = 50;
++int cwAdcBothFrom = 51;
++int cwAdcBothTo = 300;
++int cwAdcDotFrom = 301;
++int cwAdcDotTo = 600;
++int cwAdcDashFrom = 601;
++int cwAdcDashTo = 800;
++//byte cwKeyType = 0; //0: straight, 1 : iambica, 2: iambicb
++
++byte delayBeforeCWStartTime = 50;
++
++
++
++
++// in milliseconds, this is the parameter that determines how long the tx will hold between cw key downs
++//#define CW_TIMEOUT (600l)   //Change to CW Delaytime for value save to eeprom
++#define PADDLE_DOT 1
++#define PADDLE_DASH 2
++#define PADDLE_BOTH 3
++#define PADDLE_STRAIGHT 4
++
++//we store the last padde's character 
++//to alternatively send dots and dashes 
++//when both are simultaneously pressed
++char lastPaddle = 0;
++
++/*
++//reads the analog keyer pin and reports the paddle
++byte getPaddle(){
++  int paddle = analogRead(ANALOG_KEYER);
++  //handle the ptt as the straight key 
++
++  if (digitalRead(PTT) == 0)
++     return PADDLE_STRAIGHT;
++
++  if (paddle > 800)         // above 4v is up
++    return 0;
++
++  if (!Iambic_Key)
++    return PADDLE_STRAIGHT;
++    
++  if (paddle > 600)    // 4-3v is dot
++    return PADDLE_DASH;
++  else if (paddle > 300)    //1-2v is dash
++    return PADDLE_DOT;
++  else if (paddle > 50)
++    return PADDLE_BOTH;     //both are between 1 and 2v
++  else
++    return PADDLE_STRAIGHT; //less than 1v is the straight key
++}
++*/
++/**
++ * Starts transmitting the carrier with the sidetone
++ * It assumes that we have called cwTxStart and not called cwTxStop
++ * each time it is called, the cwTimeOut is pushed further into the future
++ */
++void cwKeydown(){
++
++  keyDown = 1;                  //tracks the CW_KEY
++  tone(CW_TONE, (int)sideTone); 
++  digitalWrite(CW_KEY, 1);     
++
++  //Modified by KD8CEC, for CW Delay Time save to eeprom
++  //cwTimeout = millis() + CW_TIMEOUT;
++  cwTimeout = millis() + cwDelayTime * 10;  
++}
++
++/**
++ * Stops the cw carrier transmission along with the sidetone
++ * Pushes the cwTimeout further into the future
++ */
++void cwKeyUp(){
++  keyDown = 0;    //tracks the CW_KEY
++  noTone(CW_TONE);
++  digitalWrite(CW_KEY, 0);    
++  
++  //Modified by KD8CEC, for CW Delay Time save to eeprom
++  //cwTimeout = millis() + CW_TIMEOUT;
++  cwTimeout = millis() + cwDelayTime * 10;
++}
++
++//Variables for Ron's new logic
++#define DIT_L 0x01 // DIT latch
++#define DAH_L 0x02 // DAH latch
++#define DIT_PROC 0x04 // DIT is being processed
++#define PDLSWAP 0x08 // 0 for normal, 1 for swap
++#define IAMBICB 0x10 // 0 for Iambic A, 1 for Iambic B
++enum KSTYPE {IDLE, CHK_DIT, CHK_DAH, KEYED_PREP, KEYED, INTER_ELEMENT };
++static unsigned long ktimer;
++unsigned char keyerState = IDLE;
++
++//Below is a test to reduce the keying error. do not delete lines
++//create by KD8CEC for compatible with new CW Logic
++char update_PaddleLatch(byte isUpdateKeyState) {
++  unsigned char tmpKeyerControl = 0;
++  
++  int paddle = analogRead(ANALOG_KEYER);
++  //diagnostic, VU2ESE
++  //itoa(paddle, b, 10);
++  //printLine2(b);
++
++  //use the PTT as the key for tune up, quick QSOs
++  if (digitalRead(PTT) == 0)
++     tmpKeyerControl |= DIT_L;
++  else if (paddle >= cwAdcDashFrom && paddle <= cwAdcDashTo)
++    tmpKeyerControl |= DAH_L;
++  else if (paddle >= cwAdcDotFrom && paddle <= cwAdcDotTo)
++    tmpKeyerControl |= DIT_L;
++  else if (paddle >= cwAdcBothFrom && paddle <= cwAdcBothTo)
++    tmpKeyerControl |= (DAH_L | DIT_L) ;     
++  else 
++  {
++    if (Iambic_Key)
++      tmpKeyerControl = 0 ;
++    else if (paddle >= cwAdcSTFrom && paddle <= cwAdcSTTo)
++      tmpKeyerControl = DIT_L ;
++     else
++       tmpKeyerControl = 0 ; 
++  }
++  
++  if (isUpdateKeyState == 1)
++    keyerControl |= tmpKeyerControl;
++
++  return tmpKeyerControl;
++}
++
++/*****************************************************************************
++// New logic, by RON
++// modified by KD8CEC
++******************************************************************************/
++void cwKeyer(void){
++  lastPaddle = 0;
++  bool continue_loop = true;
++  unsigned tmpKeyControl = 0;
++  
++  if( Iambic_Key ) {
++    while(continue_loop) {
++      switch (keyerState) {
++        case IDLE:
++          tmpKeyControl = update_PaddleLatch(0);
++          if ( tmpKeyControl == DAH_L || tmpKeyControl == DIT_L || 
++            tmpKeyControl == (DAH_L | DIT_L) || (keyerControl & 0x03)) {
++             update_PaddleLatch(1);
++             keyerState = CHK_DIT;
++          }else{
++            if (0 < cwTimeout && cwTimeout < millis()){
++              cwTimeout = 0;
++              stopTx();
++            }
++            continue_loop = false;
++          }
++          break;
++    
++        case CHK_DIT:
++          if (keyerControl & DIT_L) {
++            keyerControl |= DIT_PROC;
++            ktimer = cwSpeed;
++            keyerState = KEYED_PREP;
++          }else{
++            keyerState = CHK_DAH;
++          }
++          break;
++    
++        case CHK_DAH:
++          if (keyerControl & DAH_L) {
++            ktimer = cwSpeed*3;
++            keyerState = KEYED_PREP;
++          }else{
++            keyerState = IDLE;
++          }
++          break;
++    
++        case KEYED_PREP:
++          //modified KD8CEC
++          if (!inTx){
++            //DelayTime Option
++            active_delay(delayBeforeCWStartTime * 2);
++            
++            keyDown = 0;
++            cwTimeout = millis() + cwDelayTime * 10;  //+ CW_TIMEOUT;
++            startTx(TX_CW);
++          }
++          ktimer += millis(); // set ktimer to interval end time
++          keyerControl &= ~(DIT_L + DAH_L); // clear both paddle latch bits
++          keyerState = KEYED; // next state
++          
++          cwKeydown();
++          break;
++    
++        case KEYED:
++          if (millis() > ktimer) { // are we at end of key down ?
++           cwKeyUp();
++           ktimer = millis() + cwSpeed; // inter-element time
++            keyerState = INTER_ELEMENT; // next state
++          }else if (keyerControl & IAMBICB) {
++            update_PaddleLatch(1); // early paddle latch in Iambic B mode
++          }
++          break;
++    
++        case INTER_ELEMENT:
++          // Insert time between dits/dahs
++          update_PaddleLatch(1); // latch paddle state
++          if (millis() > ktimer) { // are we at end of inter-space ?
++            if (keyerControl & DIT_PROC) { // was it a dit or dah ?
++              keyerControl &= ~(DIT_L + DIT_PROC); // clear two bits
++              keyerState = CHK_DAH; // dit done, check for dah
++            }else{
++              keyerControl &= ~(DAH_L); // clear dah latch
++              keyerState = IDLE; // go idle
++            }
++          }
++          break;
++      }
++  
++      checkCAT();
++    } //end of while
++  }
++  else{
++    while(1){
++     char state = update_PaddleLatch(0);
++     // Serial.println((int)state); 
++      if (state == DIT_L) {
++        // if we are here, it is only because the key is pressed
++        if (!inTx){
++          startTx(TX_CW);
++
++          //DelayTime Option
++          active_delay(delayBeforeCWStartTime * 2);
++          
++          keyDown = 0;
++          cwTimeout = millis() + cwDelayTime * 10;  //+ CW_TIMEOUT; 
++        }
++        cwKeydown();
++        
++        while ( update_PaddleLatch(0) == DIT_L ) 
++          active_delay(1);
++          
++        cwKeyUp();
++      }
++      else{
++        if (0 < cwTimeout && cwTimeout < millis()){
++          cwTimeout = 0;
++          keyDown = 0;
++          stopTx();
++        }
++        //if (!cwTimeout) //removed by KD8CEC
++        //   return;
++        // got back to the beginning of the loop, if no further activity happens on straight key
++        // we will time out, and return out of this routine 
++        //delay(5);
++        //delay_background(5, 3); //removed by KD8CEC
++        //continue;               //removed by KD8CEC
++        return;                   //Tx stop control by Main Loop
++      }
++
++      checkCAT();
++    } //end of while
++  }   //end of elese
++}
++
++
+diff --git a/ubitx_v6.1_code/morse.cpp b/ubitx_v6.1_code/morse.cpp
+new file mode 100644
+index 0000000..d1b6dd5
+--- /dev/null
++++ b/ubitx_v6.1_code/morse.cpp
+@@ -0,0 +1,115 @@
++#include <Arduino.h>
++#include "ubitx.h"
++#include "morse.h"
++/*
++ * Each byte of the morse table stores one letter. 
++ * The 0 is a dot, a 1 is a dash 
++ * From the Most significant byte onwards, the letter is padded with 1s. 
++ * The first zero after the 1s indicates the start of the letter, it MUST be discarded
++ */
++
++extern int cwSpeed;
++struct Morse {
++  char letter;
++  unsigned char code;  
++};
++
++static const PROGMEM struct Morse morse_table[] = { 
++{'a', 0xf9}, // 11111001
++{'b', 0xe8}, // 11101000
++{'c', 0xea}, // 11101010
++{'d', 0xf4}, // 11110100
++{'e', 0xfc}, // 11111100
++{'f', 0xe4}, // 11100100
++{'g', 0xf6}, // 11110110
++{'h', 0xe0}, // 11100000
++{'i', 0xf8}, // 11111000
++{'j', 0xe7}, // 11100111
++{'k', 0xf6}, // 11110101
++{'l', 0xe4}, // 11100100
++{'m', 0xfb}, // 11111011
++{'n', 0xfa}, // 11111010
++{'o', 0xf7}, // 11110111
++{'p', 0xe6}, // 11100110
++{'q', 0xed}, // 11101101
++{'r', 0xf2}, // 11110010
++{'s', 0xf0}, // 11110000
++{'t', 0xfd}, // 11111101
++{'u', 0xf1}, // 11110001
++{'v', 0xe1}, // 11100001
++{'w', 0xf3}, // 11110011
++{'x', 0xe9}, // 11101001
++{'y', 0xe3}, // 11101011
++{'z', 0xec}, // 11101100
++{'1', 0xcf}, // 11001111
++{'2', 0xc7}, // 11000111
++{'3', 0xc3}, // 11000011
++{'4', 0xc1}, // 11000001
++{'5', 0xc0}, // 11000000
++{'6', 0xd0}, // 11010000
++{'7', 0xd8}, // 11011000
++{'8', 0xdc}, // 11011100
++{'9', 0xde}, // 11011110
++{'0', 0xdf}, // 11011111
++{'.', 0xd5}, // 110010101
++{',', 0xd3}, // 110110011 //AD7U 20191217 
++{'?', 0xcc}, // 11001100 //AD7U 20191217 - Added
++};
++
++static void morseLetter(char c){
++  unsigned char mask = 0x80;
++
++  //handle space character as three dashes
++  if (c == ' '){
++    active_delay(cwSpeed * 9);
++    Serial.print(' ');
++    return;
++  }
++
++  for (int i = 0; i < sizeof(morse_table)/ sizeof(struct Morse); i++){
++    struct Morse m;
++    memcpy_P(&m, morse_table + i, sizeof(struct Morse));
++
++    if (m.letter == tolower(c)){
++      unsigned char code = m.code;
++      //Serial.print(m.letter); Serial.println(' ');
++  
++      while(mask & code && mask > 1)
++        mask = mask >> 1;
++      //now we are at the first zero, skip and carry on
++      mask = mask >> 1;
++      while(mask){
++        tone(CW_TONE, sideTone,10000);
++        if (mask & code){
++          delay(3 * (int)cwSpeed);
++          //Serial.print('-');
++        }
++        else{
++          delay((int)cwSpeed);
++          //Serial.print('.');
++        }
++        //Serial.print('#');
++        noTone(CW_TONE);
++        delay((int)cwSpeed); // space between dots and dashes
++        mask = mask >> 1;
++      }
++      //Serial.println('@');
++      delay(200); // space between letters is a dash (3 dots), one dot's space has already been sent
++    }
++  }
++}
++
++void morseText(char *text){
++//  while (1){
++  noTone(CW_TONE);
++  delay(1000);
++  tone(CW_TONE, 600);
++  delay(1000);
++//  }
++  
++  Serial.println(sideTone);
++  while(*text){
++    morseLetter(*text++);
++  }
++}
++
+diff --git a/ubitx_v6.1_code/morse.h b/ubitx_v6.1_code/morse.h
+new file mode 100644
+index 0000000..9c2de08
+--- /dev/null
++++ b/ubitx_v6.1_code/morse.h
+@@ -0,0 +1,3 @@
++//sends out morse code at the speed set by cwSpeed
++extern int cwSpeed;            //this is actuall the dot period in milliseconds
++void morseText(char *text);
+diff --git a/ubitx_v6.1_code/nano_gui.cpp b/ubitx_v6.1_code/nano_gui.cpp
+new file mode 100644
+index 0000000..a423b74
+--- /dev/null
++++ b/ubitx_v6.1_code/nano_gui.cpp
+@@ -0,0 +1,582 @@
++#include <Arduino.h>
++#include <EEPROM.h>
++#include "ubitx.h"
++#include "nano_gui.h"
++
++//#include "Adafruit_GFX.h"
++//#include <XPT2046_Touchscreen.h>
++#include <SPI.h>
++#include <avr/pgmspace.h>
++
++#define TFT_CS    10        
++#define TFT_RS    9
++
++
++GFXfont *gfxFont = NULL;
++//int touch_x, touch_y;
++//XPT2046_Touchscreen ts(CS_PIN);
++//TS_Point ts_point;
++struct Point ts_point;
++
++//filled from a test run of calibration routine
++int slope_x=104, slope_y=137, offset_x=28, offset_y=29;
++
++void readTouchCalibration(){
++  EEPROM.get(SLOPE_X, slope_x);
++  EEPROM.get(SLOPE_Y, slope_y);
++  EEPROM.get(OFFSET_X, offset_x);
++  EEPROM.get(OFFSET_Y, offset_y);  
++
++/*
++  //for debugging
++  Serial.print(slope_x); Serial.print(' ');
++  Serial.print(slope_y); Serial.print(' ');
++  Serial.print(offset_x); Serial.print(' ');
++  Serial.println(offset_y); Serial.println(' ');
++*/
++
++}
++
++void writeTouchCalibration(){
++  EEPROM.put(SLOPE_X, slope_x);
++  EEPROM.put(SLOPE_Y, slope_y);
++  EEPROM.put(OFFSET_X, offset_x);
++  EEPROM.put(OFFSET_Y, offset_y);    
++}
++
++#define Z_THRESHOLD     400
++#define Z_THRESHOLD_INT  75
++#define MSEC_THRESHOLD  3
++#define SPI_SETTING     SPISettings(2000000, MSBFIRST, SPI_MODE0)
++
++static uint32_t msraw=0x80000000;
++static  int16_t xraw=0, yraw=0, zraw=0;
++static uint8_t rotation = 1;
++
++static int16_t touch_besttwoavg( int16_t x , int16_t y , int16_t z ) {
++  int16_t da, db, dc;
++  int16_t reta = 0;
++  if ( x > y ) da = x - y; else da = y - x;
++  if ( x > z ) db = x - z; else db = z - x;
++  if ( z > y ) dc = z - y; else dc = y - z;
++
++  if ( da <= db && da <= dc ) reta = (x + y) >> 1;
++  else if ( db <= da && db <= dc ) reta = (x + z) >> 1;
++  else reta = (y + z) >> 1;   //    else if ( dc <= da && dc <= db ) reta = (x + y) >> 1;
++
++  return (reta);
++}
++
++static void touch_update(){
++  int16_t data[6];
++
++  uint32_t now = millis();
++  if (now - msraw < MSEC_THRESHOLD) return;
++  
++  SPI.beginTransaction(SPI_SETTING);
++  digitalWrite(CS_PIN, LOW);
++  SPI.transfer(0xB1 /* Z1 */);
++  int16_t z1 = SPI.transfer16(0xC1 /* Z2 */) >> 3;
++  int z = z1 + 4095;
++  int16_t z2 = SPI.transfer16(0x91 /* X */) >> 3;
++  z -= z2;
++  if (z >= Z_THRESHOLD) {
++    SPI.transfer16(0x91 /* X */);  // dummy X measure, 1st is always noisy
++    data[0] = SPI.transfer16(0xD1 /* Y */) >> 3;
++    data[1] = SPI.transfer16(0x91 /* X */) >> 3; // make 3 x-y measurements
++    data[2] = SPI.transfer16(0xD1 /* Y */) >> 3;
++    data[3] = SPI.transfer16(0x91 /* X */) >> 3;
++  }
++  else data[0] = data[1] = data[2] = data[3] = 0; // Compiler warns these values may be used unset on early exit.
++  data[4] = SPI.transfer16(0xD0 /* Y */) >> 3;  // Last Y touch power down
++  data[5] = SPI.transfer16(0) >> 3;
++  digitalWrite(CS_PIN, HIGH);
++  SPI.endTransaction();
++  //Serial.printf("z=%d  ::  z1=%d,  z2=%d  ", z, z1, z2);
++  if (z < 0) z = 0;
++  if (z < Z_THRESHOLD) { // if ( !touched ) {
++    // Serial.println();
++    zraw = 0;
++    return;
++  }
++  zraw = z;
++  
++  int16_t x = touch_besttwoavg( data[0], data[2], data[4] );
++  int16_t y = touch_besttwoavg( data[1], data[3], data[5] );
++  
++  //Serial.printf("    %d,%d", x, y);
++  //Serial.println();
++  if (z >= Z_THRESHOLD) {
++    msraw = now;  // good read completed, set wait
++    switch (rotation) {
++      case 0:
++      xraw = 4095 - y;
++      yraw = x;
++      break;
++      case 1:
++      xraw = x;
++      yraw = y;
++      break;
++      case 2:
++      xraw = y;
++      yraw = 4095 - x;
++      break;
++      default: // 3
++      xraw = 4095 - x;
++      yraw = 4095 - y;
++    }
++  }
++}
++
++
++boolean readTouch(){
++  touch_update();
++  if (zraw >= Z_THRESHOLD) {
++    ts_point.x = xraw;
++    ts_point.y = yraw;
++//    Serial.print(ts_point.x); Serial.print(",");Serial.println(ts_point.y);
++    return true;
++  }
++  return false;
++}
++
++void scaleTouch(struct Point *p){
++  p->x = ((long)(p->x - offset_x) * 10l)/ (long)slope_x;
++  p->y = ((long)(p->y - offset_y) * 10l)/ (long)slope_y;
++
++// Serial.print(p->x); Serial.print(",");Serial.println(p->y);
++ 
++//  p->y = ((long)(p->y) * 10l)/(long)(slope_y) - offset_y;  
++}
++
++
++#if !defined(__INT_MAX__) || (__INT_MAX__ > 0xFFFF)
++ #define pgm_read_pointer(addr) ((void *)pgm_read_dword(addr))
++#else
++ #define pgm_read_pointer(addr) ((void *)pgm_read_word(addr))
++#endif
++
++inline GFXglyph * pgm_read_glyph_ptr(const GFXfont *gfxFont, uint8_t c)
++{
++#ifdef __AVR__
++    return &(((GFXglyph *)pgm_read_pointer(&gfxFont->glyph))[c]);
++#else
++    // expression in __AVR__ section may generate "dereferencing type-punned pointer will break strict-aliasing rules" warning
++    // In fact, on other platforms (such as STM32) there is no need to do this pointer magic as program memory may be read in a usual way
++    // So expression may be simplified
++    return gfxFont->glyph + c;
++#endif //__AVR__
++}
++
++inline uint8_t * pgm_read_bitmap_ptr(const GFXfont *gfxFont){
++#ifdef __AVR__
++    return (uint8_t *)pgm_read_pointer(&gfxFont->bitmap);
++#else
++    // expression in __AVR__ section generates "dereferencing type-punned pointer will break strict-aliasing rules" warning
++    // In fact, on other platforms (such as STM32) there is no need to do this pointer magic as program memory may be read in a usual way
++    // So expression may be simplified
++    return gfxFont->bitmap;
++#endif //__AVR__
++}
++
++inline static void utft_write(unsigned char d){
++  SPI.transfer(d);
++}
++
++inline static void utftCmd(unsigned char VH){   
++  *(portOutputRegister(digitalPinToPort(TFT_RS))) &=  ~digitalPinToBitMask(TFT_RS);//LCD_RS=0;
++  utft_write(VH);
++}
++
++inline static void utftData(unsigned char VH){
++  *(portOutputRegister(digitalPinToPort(TFT_RS)))|=  digitalPinToBitMask(TFT_RS);//LCD_RS=1;
++  utft_write(VH);
++}
++
++
++static void utftAddress(unsigned int x1,unsigned int y1,unsigned int x2,unsigned int y2){
++
++  utftCmd(0x2a);
++  utftData(x1>>8);
++  utftData(x1);
++  utftData(x2>>8);
++  utftData(x2);
++  utftCmd(0x2b);
++  utftData(y1>>8);
++  utftData(y1);
++  utftData(y2>>8);
++  utftData(y2);
++  utftCmd(0x2c);               
++}
++
++void displayPixel(unsigned int x, unsigned int y, unsigned int c){  
++  unsigned int i,j;
++  digitalWrite(TFT_CS,LOW);
++
++  utftCmd(0x02c); //write_memory_start
++  utftAddress(x,y,x,y);
++  utftData(c>>8);
++  utftData(c);
++
++  digitalWrite(TFT_CS,HIGH);   
++}
++
++#define MAX_VBUFF 64
++char vbuff[64];
++void quickFill(int x1, int y1, int x2, int y2, int color){
++  unsigned long ncount = (unsigned long)(x2 - x1+1) * (unsigned long)(y2-y1+1);
++  int k = 0;
++
++  //set the window
++  digitalWrite(TFT_CS,LOW);
++  utftCmd(0x02c); //write_memory_start  
++  utftAddress(x1,y1,x2,y2);
++  *(portOutputRegister(digitalPinToPort(TFT_RS)))|=  digitalPinToBitMask(TFT_RS);//LCD_RS=1;  
++  
++  while(ncount){
++    k = 0;
++    for (int i = 0; i < MAX_VBUFF/2; i++){
++      vbuff[k++] = color >> 8;
++      vbuff[k++] = color & 0xff;
++    }
++
++    if (ncount > MAX_VBUFF/2){
++      SPI.transfer(vbuff, MAX_VBUFF);
++      ncount -= MAX_VBUFF/2;
++    }  
++    else{
++      SPI.transfer(vbuff, (int)ncount * 2);
++      ncount = 0;      
++    }
++    checkCAT();
++  }
++  digitalWrite(TFT_CS, HIGH);
++}
++
++void displayHline(unsigned int x, unsigned int y, unsigned int l, unsigned int c){  
++  quickFill(x,y,x+l,y,c);
++}
++
++void displayVline(unsigned int x, unsigned int y, unsigned int l, unsigned int c){ 
++  quickFill(x,y,x,y+l,c);
++}
++
++void displayClear(unsigned int color){  
++  quickFill(0,0,319,239, color);
++}
++
++void displayRect(unsigned int x,unsigned int y,unsigned int w,unsigned int h,unsigned int c){
++  displayHline(x  , y  , w, c);
++  displayHline(x  , y+h, w, c);
++  displayVline(x  , y  , h, c);
++  displayVline(x+w, y  , h, c);
++}
++
++void displayFillrect(unsigned int x,unsigned int y,unsigned int w,unsigned int h,unsigned int c){
++  unsigned int i;
++  quickFill(x,y,x+w,y+h, c);
++}
++
++bool xpt2046_Init(){
++  pinMode(CS_PIN, OUTPUT);
++  digitalWrite(CS_PIN, HIGH);
++}
++
++void displayInit(void){
++
++  SPI.begin();
++  SPI.setClockDivider(SPI_CLOCK_DIV4); // 4 MHz (half speed)
++  SPI.setBitOrder(MSBFIRST);
++  SPI.setDataMode(SPI_MODE0);  
++
++  gfxFont = &ubitx_font;
++  pinMode(TFT_CS,OUTPUT);
++  pinMode(TFT_RS,OUTPUT);
++
++
++  digitalWrite(TFT_CS,LOW);  //CS
++  utftCmd(0xCB);  
++  utftData(0x39); 
++  utftData(0x2C); 
++  utftData(0x00); 
++  utftData(0x34); 
++  utftData(0x02); 
++
++  utftCmd(0xCF);  
++  utftData(0x00); 
++  utftData(0XC1); 
++  utftData(0X30); 
++
++  utftCmd(0xE8);  
++  utftData(0x85); 
++  utftData(0x00); 
++  utftData(0x78); 
++
++  utftCmd(0xEA);  
++  utftData(0x00); 
++  utftData(0x00); 
++
++  utftCmd(0xED);  
++  utftData(0x64); 
++  utftData(0x03); 
++  utftData(0X12); 
++  utftData(0X81); 
++
++  utftCmd(0xF7);  
++  utftData(0x20); 
++
++  utftCmd(0xC0);    //Power control 
++  utftData(0x23);   //VRH[5:0] 
++
++  utftCmd(0xC1);    //Power control 
++  utftData(0x10);   //SAP[2:0];BT[3:0] 
++
++  utftCmd(0xC5);    //VCM control 
++  utftData(0x3e);   //Contrast
++  utftData(0x28); 
++
++  utftCmd(0xC7);    //VCM control2 
++  utftData(0x86);   //--
++
++  utftCmd(0x36);    // Memory Access Control 
++  utftData(0x28);   // Make this horizontal display   
++
++  utftCmd(0x3A);    
++  utftData(0x55); 
++
++  utftCmd(0xB1);    
++  utftData(0x00);  
++  utftData(0x18); 
++
++  utftCmd(0xB6);    // Display Function Control 
++  utftData(0x08); 
++  utftData(0x82);
++  utftData(0x27);  
++
++  utftCmd(0x11);    //Exit Sleep 
++  delay(120); 
++      
++  utftCmd(0x29);    //Display on 
++  utftCmd(0x2c); 
++  digitalWrite(TFT_CS,HIGH);
++
++  //now to init the touch screen controller
++  //ts.begin();
++  //ts.setRotation(1);
++  xpt2046_Init();
++  
++  readTouchCalibration();  
++}
++
++// Draw a character
++/**************************************************************************/
++/*!
++   @brief   Draw a single character
++    @param    x   Bottom left corner x coordinate
++    @param    y   Bottom left corner y coordinate
++    @param    c   The 8-bit font-indexed character (likely ascii)
++    @param    color 16-bit 5-6-5 Color to draw chraracter with
++    @param    bg 16-bit 5-6-5 Color to fill background with (if same as color, no background)
++    @param    size_x  Font magnification level in X-axis, 1 is 'original' size
++    @param    size_y  Font magnification level in Y-axis, 1 is 'original' size
++*/
++/**************************************************************************/
++
++
++void displayChar(int16_t x, int16_t y, unsigned char c, uint16_t color, uint16_t bg) {
++  c -= (uint8_t)pgm_read_byte(&gfxFont->first);
++  GFXglyph *glyph  = pgm_read_glyph_ptr(gfxFont, c);
++  uint8_t  *bitmap = pgm_read_bitmap_ptr(gfxFont);
++  
++  uint16_t bo = pgm_read_word(&glyph->bitmapOffset);
++  uint8_t  w  = pgm_read_byte(&glyph->width),
++           h  = pgm_read_byte(&glyph->height);
++  int8_t   xo = pgm_read_byte(&glyph->xOffset),
++           yo = pgm_read_byte(&glyph->yOffset);
++  uint8_t  xx, yy, bits = 0, bit = 0;
++  int16_t  xo16 = 0, yo16 = 0;
++  int k;
++  char vbuff[64]; // take a character that is upto 32 pixels wide (2 bytes per pixel)      
++  digitalWrite(TFT_CS,LOW);
++  
++  for(yy=0; yy<h; yy++) {
++    k = 0;
++    for(xx=0; xx<w; xx++) {
++      if(!(bit++ & 7)) {
++        bits = pgm_read_byte(&bitmap[bo++]);
++      }
++      if(bits & 0x80) {
++        vbuff[k++] = color >> 8;
++        vbuff[k++] = color & 0xff;
++      }
++      else {
++        vbuff[k++] = bg >> 8;
++        vbuff[k++] = bg & 0xff;
++      }
++      bits <<= 1;
++    }
++    utftAddress(x+xo,y+yo+yy,x+xo+w,y+yo+yy);
++    *(portOutputRegister(digitalPinToPort(TFT_RS)))|=  digitalPinToBitMask(TFT_RS);//LCD_RS=1;  
++    SPI.transfer(vbuff, k);    
++    checkCAT();
++  }
++}
++
++int displayTextExtent(char *text) {
++
++  int ext = 0;
++  while(*text){
++    char c = *text++;
++    uint8_t first = pgm_read_byte(&gfxFont->first);
++    if((c >= first) && (c <= (uint8_t)pgm_read_byte(&gfxFont->last))) {
++        GFXglyph *glyph  = pgm_read_glyph_ptr(gfxFont, c - first);
++        ext += (uint8_t)pgm_read_byte(&glyph->xAdvance);    
++    }
++  }//end of the while loop of the characters to be printed
++  return ext;
++}
++
++void displayRawText(char *text, int x1, int y1, int color, int background){
++  while(*text){
++    char c = *text++;
++    
++    uint8_t first = pgm_read_byte(&gfxFont->first);
++    if((c >= first) && (c <= (uint8_t)pgm_read_byte(&gfxFont->last))) {
++  
++        GFXglyph *glyph  = pgm_read_glyph_ptr(gfxFont, c - first);
++        uint8_t   w     = pgm_read_byte(&glyph->width),
++                  h     = pgm_read_byte(&glyph->height);
++        if((w > 0) && (h > 0)) { // Is there an associated bitmap?
++            int16_t xo = (int8_t)pgm_read_byte(&glyph->xOffset); // sic
++            displayChar(x1, y1+TEXT_LINE_HEIGHT, c, color, background);
++            checkCAT();
++        }
++        x1 += (uint8_t)pgm_read_byte(&glyph->xAdvance);    
++    }
++  }//end of the while loop of the characters to be printed
++}
++
++// The generic routine to display one line on the LCD 
++void displayText(char *text, int x1, int y1, int w, int h, int color, int background, int border) {
++
++  displayFillrect(x1, y1, w ,h, background);
++  displayRect(x1, y1, w ,h, border);
++
++  x1 += (w - displayTextExtent(text))/2;
++  y1  += (h - TEXT_LINE_HEIGHT)/2;
++  while(*text){
++    char c = *text++;
++    
++    uint8_t first = pgm_read_byte(&gfxFont->first);
++    if((c >= first) && (c <= (uint8_t)pgm_read_byte(&gfxFont->last))) {
++  
++        GFXglyph *glyph  = pgm_read_glyph_ptr(gfxFont, c - first);
++        uint8_t   w     = pgm_read_byte(&glyph->width),
++                  h     = pgm_read_byte(&glyph->height);
++        if((w > 0) && (h > 0)) { // Is there an associated bitmap?
++            int16_t xo = (int8_t)pgm_read_byte(&glyph->xOffset); // sic
++            displayChar(x1, y1+TEXT_LINE_HEIGHT, c, color, background);
++            checkCAT();
++        }
++        x1 += (uint8_t)pgm_read_byte(&glyph->xAdvance);    
++    }
++  }//end of the while loop of the characters to be printed
++}
++
++void setupTouch(){
++  int x1, y1, x2, y2, x3, y3, x4, y4;
++  
++  displayClear(DISPLAY_BLACK);
++  displayText("Click on the cross", 20,100, 200, 50, DISPLAY_WHITE, DISPLAY_BLACK, DISPLAY_BLACK);
++
++  // TOP-LEFT
++  displayHline(10,20,20,DISPLAY_WHITE);
++  displayVline(20,10,20, DISPLAY_WHITE);
++
++  while(!readTouch())
++    delay(100);
++  while(readTouch())
++    delay(100);
++   x1 = ts_point.x;
++   y1 = ts_point.y; 
++
++  //rubout the previous one
++  displayHline(10,20,20,DISPLAY_BLACK);
++  displayVline(20,10,20, DISPLAY_BLACK);
++
++  delay(1000);
++   
++  //TOP RIGHT
++  displayHline(290,20,20,DISPLAY_WHITE);
++  displayVline(300,10,20, DISPLAY_WHITE);
++
++  while(!readTouch())
++    delay(100); 
++  while(readTouch())
++    delay(100);
++   x2 = ts_point.x;
++   y2 = ts_point.y; 
++
++  displayHline(290,20,20,DISPLAY_BLACK);
++  displayVline(300,10,20, DISPLAY_BLACK);
++
++  delay(1000);
++
++  //BOTTOM LEFT
++  displayHline(10,220,20,DISPLAY_WHITE);
++  displayVline(20,210,20, DISPLAY_WHITE);
++  
++  while(!readTouch())
++    delay(100);
++   x3 = ts_point.x;
++   y3 = ts_point.y; 
++     
++  while(readTouch())
++    delay(100);
++  displayHline(10,220,20,DISPLAY_BLACK);
++  displayVline(20,210,20, DISPLAY_BLACK);
++
++  delay(1000);
++
++  //BOTTOM RIGHT
++  displayHline(290,220,20,DISPLAY_WHITE);
++  displayVline(300,210,20, DISPLAY_WHITE);
++
++  while(!readTouch())
++    delay(100);
++   x4 = ts_point.x;
++   y4 = ts_point.y; 
++     
++  
++  displayHline(290,220,20,DISPLAY_BLACK);
++  displayVline(300,210,20, DISPLAY_BLACK);
++
++  // we average two readings and divide them by half and store them as scaled integers 10 times their actual, fractional value
++  //the x points are located at 20 and 300 on x axis, hence, the delta x is 280, we take 28 instead, to preserve fractional value,
++  //there are two readings (x1,x2) and (x3, x4). Hence, we have to divide by 28 * 2 = 56 
++  slope_x = ((x4 - x3) + (x2 - x1))/56; 
++  //the y points are located at 20 and 220 on the y axis, hence, the delta is 200. we take it as 20 instead, to preserve the fraction value 
++  //there are two readings (y1, y2) and (y3, y4). Hence we have to divide by 20 * 2 = 40
++  slope_y = ((y3 - y1) + (y4 - y2))/40;
++  
++  //x1, y1 is at 20 pixels
++  offset_x = x1 + -((20 * slope_x)/10);
++  offset_y = y1 + -((20 * slope_y)/10);
++
++/*
++  Serial.print(x1);Serial.print(':');Serial.println(y1);
++  Serial.print(x2);Serial.print(':');Serial.println(y2);
++  Serial.print(x3);Serial.print(':');Serial.println(y3);
++  Serial.print(x4);Serial.print(':');Serial.println(y4);
++  
++  //for debugging
++  Serial.print(slope_x); Serial.print(' ');
++  Serial.print(slope_y); Serial.print(' ');
++  Serial.print(offset_x); Serial.print(' ');
++  Serial.println(offset_y); Serial.println(' ');
++*/  
++  writeTouchCalibration();
++  displayClear(DISPLAY_BLACK);
++}
++
++
+diff --git a/ubitx_v6.1_code/nano_gui.h b/ubitx_v6.1_code/nano_gui.h
+new file mode 100644
+index 0000000..4ae4719
+--- /dev/null
++++ b/ubitx_v6.1_code/nano_gui.h
+@@ -0,0 +1,431 @@
++#ifndef _NANO_GUI_H_
++#define _NANO_GUI_H_
++
++/* UI functions */
++struct Point {
++  int x, y;
++};
++extern struct Point ts_point;
++
++void displayInit();
++void displayClear(unsigned int color);
++void displayPixel(unsigned int x, unsigned int y, unsigned int c);
++void displayHline(unsigned int x, unsigned int y, unsigned int l, unsigned int c);
++void displayVline(unsigned int x, unsigned int y, unsigned int l, unsigned int c);
++void displayRect(unsigned int x,unsigned int y,unsigned int w,unsigned int h,unsigned int c);
++void displayFillrect(unsigned int x,unsigned int y,unsigned int w,unsigned int h,unsigned int c);
++void displayChar(int16_t x, int16_t y, unsigned char c, uint16_t color, uint16_t bg);
++int displayTextExtent(char *text);
++void displayRawText(char *text, int x1, int y1, int color, int background);
++void displayText(char *text, int x1, int y1, int w, int h, int color, int background, int border);
++
++/* touch functions */
++boolean readTouch();
++
++void setupTouch();
++void scaleTouch(struct Point *p);
++
++// Color definitions
++#define DISPLAY_BLACK       0x0000  ///<   0,   0,   0
++#define DISPLAY_NAVY        0x000F  ///<   0,   0, 123
++#define DISPLAY_DARKGREEN   0x03E0  ///<   0, 125,   0
++#define DISPLAY_DARKCYAN    0x03EF  ///<   0, 125, 123
++#define DISPLAY_MAROON      0x7800  ///< 123,   0,   0
++#define DISPLAY_PURPLE      0x780F  ///< 123,   0, 123
++#define DISPLAY_OLIVE       0x7BE0  ///< 123, 125,   0
++#define DISPLAY_LIGHTGREY   0xC618  ///< 198, 195, 198
++#define DISPLAY_DARKGREY    0x7BEF  ///< 123, 125, 123
++#define DISPLAY_BLUE        0x001F  ///<   0,   0, 255
++#define DISPLAY_GREEN       0x07E0  ///<   0, 255,   0
++#define DISPLAY_CYAN        0x07FF  ///<   0, 255, 255
++#define DISPLAY_RED         0xF800  ///< 255,   0,   0
++#define DISPLAY_MAGENTA     0xF81F  ///< 255,   0, 255
++#define DISPLAY_YELLOW      0xFFE0  ///< 255, 255,   0
++#define DISPLAY_WHITE       0xFFFF  ///< 255, 255, 255
++#define DISPLAY_ORANGE      0xFD20  ///< 255, 165,   0
++#define DISPLAY_GREENYELLOW 0xAFE5  ///< 173, 255,  41
++#define DISPLAY_PINK        0xFC18  ///< 255, 130, 198
++
++#define TEXT_LINE_HEIGHT 18
++#define TEXT_LINE_INDENT 5
++
++#define BUTTON_PUSH
++#define BUTTON_CHECK
++#define BUTTON_SPINNER
++
++/// Font data stored PER GLYPH
++typedef struct {
++  uint16_t bitmapOffset;     ///< Pointer into GFXfont->bitmap
++  uint8_t  width;            ///< Bitmap dimensions in pixels
++        uint8_t  height;           ///< Bitmap dimensions in pixels
++  uint8_t  xAdvance;         ///< Distance to advance cursor (x axis)
++  int8_t   xOffset;          ///< X dist from cursor pos to UL corner
++        int8_t   yOffset;          ///< Y dist from cursor pos to UL corner
++} GFXglyph;
++
++/// Data stored for FONT AS A WHOLE
++typedef struct { 
++  uint8_t  *bitmap;      ///< Glyph bitmaps, concatenated
++  GFXglyph *glyph;       ///< Glyph array
++  uint8_t   first;       ///< ASCII extents (first char)
++        uint8_t   last;        ///< ASCII extents (last char)
++  uint8_t   yAdvance;    ///< Newline distance (y axis)
++} GFXfont;
++
++const uint8_t ubitxBitmaps[] PROGMEM = {
++  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC,
++  0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80,
++  0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0,
++  0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F,
++  0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC,
++  0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80,
++  0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0,
++  0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F,
++  0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC,
++  0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80,
++  0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0,
++  0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F,
++  0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC,
++  0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80,
++  0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0,
++  0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F,
++  0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC,
++  0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80,
++  0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0,
++  0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F,
++  0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC,
++  0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80,
++  0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0,
++  0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F,
++  0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0,
++  0xFF, 0xFF, 0xFF, 0xFF, 0x21, 0xFF, 0xE0, 0xF3, 0xF9, 0xFC, 0xFE, 0x7E,
++  0x3B, 0x1D, 0x84, 0x0E, 0x70, 0x73, 0x83, 0x9C, 0x18, 0xC7, 0xFF, 0xBF,
++  0xFD, 0xFF, 0xE3, 0x9C, 0x18, 0xC0, 0xC6, 0x0E, 0x7D, 0xFF, 0xEF, 0xFF,
++  0x18, 0xC0, 0xC6, 0x0E, 0x70, 0x73, 0x83, 0x9C, 0x00, 0x04, 0x01, 0xF8,
++  0x7F, 0xCF, 0xDE, 0xE4, 0xEE, 0x4E, 0xE4, 0x0F, 0x40, 0x7E, 0x03, 0xFC,
++  0x0F, 0xE0, 0x5E, 0x04, 0xFE, 0x4F, 0xE4, 0xFF, 0x4E, 0x7F, 0xE3, 0xFC,
++  0x04, 0x00, 0x40, 0x04, 0x00, 0x3C, 0x06, 0x07, 0xE0, 0x60, 0xFF, 0x0C,
++  0x0C, 0x30, 0x80, 0xC3, 0x18, 0x0C, 0x31, 0x00, 0xFF, 0x30, 0x07, 0xE6,
++  0x00, 0x3C, 0x60, 0x00, 0x0C, 0x7C, 0x00, 0xCF, 0xE0, 0x19, 0xC6, 0x01,
++  0x98, 0x70, 0x31, 0x87, 0x03, 0x1C, 0x60, 0x60, 0xFE, 0x04, 0x07, 0xC0,
++  0x0F, 0x80, 0x1F, 0xC0, 0x3D, 0xE0, 0x38, 0xE0, 0x3C, 0xE0, 0x1D, 0xC0,
++  0x1F, 0xC0, 0x0F, 0x00, 0x3F, 0x8C, 0x7B, 0xDC, 0x71, 0xDC, 0xF1, 0xFC,
++  0xF0, 0xF8, 0xF0, 0x78, 0x79, 0xFC, 0x7F, 0xFC, 0x3F, 0x9E, 0x00, 0x00,
++  0xFF, 0xFF, 0xE6, 0x60, 0x0C, 0x71, 0x8E, 0x31, 0xC7, 0x38, 0xE3, 0x8E,
++  0x38, 0xE3, 0x8E, 0x38, 0x71, 0xC7, 0x0E, 0x38, 0x70, 0xC0, 0xC3, 0x86,
++  0x1C, 0x70, 0xE3, 0x8E, 0x1C, 0x71, 0xC7, 0x1C, 0x71, 0xCE, 0x38, 0xE7,
++  0x1C, 0x63, 0x8C, 0x00, 0x10, 0x10, 0x10, 0xFE, 0x7C, 0x38, 0x6C, 0x44,
++  0x06, 0x00, 0x60, 0x06, 0x00, 0x60, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0x60,
++  0x06, 0x00, 0x60, 0x06, 0x00, 0xFF, 0xF2, 0xFE, 0xFF, 0xFF, 0xC0, 0xFF,
++  0xF0, 0x04, 0x08, 0x30, 0x60, 0x83, 0x06, 0x08, 0x10, 0x60, 0xC1, 0x06,
++  0x0C, 0x10, 0x20, 0xC0, 0x3F, 0x8F, 0xF9, 0xEF, 0x78, 0xFE, 0x0F, 0xC1,
++  0xF8, 0x3F, 0x07, 0xE0, 0xFC, 0x1F, 0x83, 0xF0, 0x7E, 0x0F, 0xE3, 0xDE,
++  0xF3, 0xFE, 0x3F, 0x80, 0x80, 0x06, 0x1C, 0x7F, 0xFF, 0xE1, 0xC3, 0x87,
++  0x0E, 0x1C, 0x38, 0x70, 0xE1, 0xC3, 0x87, 0x0E, 0x3F, 0x8F, 0xFB, 0xEF,
++  0xF8, 0x7E, 0x0F, 0xC1, 0xC0, 0x38, 0x0F, 0x03, 0xC0, 0xF0, 0x7C, 0x1F,
++  0x07, 0x80, 0xE0, 0x3F, 0xFF, 0xFF, 0xFF, 0xE0, 0x3F, 0x8F, 0xFB, 0xCF,
++  0xF0, 0xFE, 0x1E, 0x03, 0xC0, 0x70, 0x7C, 0x0F, 0xC0, 0xFC, 0x03, 0x80,
++  0x7E, 0x0F, 0xC1, 0xFC, 0xFB, 0xFE, 0x3F, 0x80, 0x80, 0x07, 0xC0, 0x7C,
++  0x0F, 0xC0, 0xFC, 0x1F, 0xC3, 0xBC, 0x33, 0xC7, 0x3C, 0x63, 0xCE, 0x3C,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0x3C, 0x03, 0xC0, 0x3C, 0x03, 0xC0, 0x3F,
++  0xEF, 0xFD, 0xFF, 0xB8, 0x06, 0x00, 0xC0, 0x1F, 0xE7, 0xFE, 0xF1, 0xE0,
++  0x1C, 0x03, 0x80, 0x70, 0x0F, 0xC1, 0xFC, 0xFB, 0xFE, 0x3F, 0x80, 0x80,
++  0x1F, 0x87, 0xF9, 0xE7, 0xB8, 0x7E, 0x01, 0xC0, 0x3B, 0xE7, 0xFE, 0xFB,
++  0xFE, 0x1F, 0x83, 0xF0, 0x7E, 0x0F, 0xE1, 0xDE, 0xFB, 0xFE, 0x3F, 0x80,
++  0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0x0E, 0x01, 0xC0, 0x3C, 0x03, 0x80,
++  0x70, 0x0F, 0x00, 0xE0, 0x0E, 0x01, 0xE0, 0x1C, 0x01, 0xC0, 0x1C, 0x03,
++  0xC0, 0x3C, 0x00, 0x3F, 0x87, 0xFC, 0xF9, 0xEE, 0x0E, 0xE0, 0xEE, 0x0E,
++  0x71, 0xC3, 0xF8, 0x7F, 0xCF, 0x1E, 0xE0, 0xEE, 0x0F, 0xE0, 0xFE, 0x0E,
++  0xF1, 0xE7, 0xFC, 0x3F, 0x80, 0x40, 0x3F, 0x0F, 0xFB, 0xEF, 0x70, 0xFE,
++  0x0F, 0xC1, 0xF8, 0x3F, 0x0F, 0xF3, 0xEF, 0xFC, 0xFB, 0x80, 0x70, 0x0F,
++  0xC3, 0xFE, 0xF3, 0xFE, 0x3F, 0x80, 0x80, 0xFF, 0x80, 0x00, 0xFF, 0xF0,
++  0xFF, 0x80, 0x00, 0xFF, 0xF2, 0xDE, 0x00, 0x70, 0x1F, 0x0F, 0xE7, 0xF0,
++  0xF8, 0x0E, 0x00, 0xFC, 0x03, 0xF8, 0x0F, 0xE0, 0x1F, 0x00, 0x30, 0xFF,
++  0xFF, 0xFF, 0xFF, 0xF0, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF,
++  0xF0, 0xC0, 0x0F, 0x80, 0x7F, 0x00, 0xFC, 0x03, 0xF0, 0x07, 0x03, 0xF1,
++  0xFC, 0xFE, 0x0F, 0x80, 0xC0, 0x00, 0x1F, 0x0F, 0xF3, 0xFF, 0x78, 0xFE,
++  0x0F, 0xC1, 0xC0, 0x38, 0x0F, 0x03, 0xE0, 0xF8, 0x3C, 0x07, 0x00, 0xE0,
++  0x00, 0x03, 0x80, 0x70, 0x0E, 0x01, 0xC0, 0x00, 0xFC, 0x00, 0x0F, 0xFE,
++  0x00, 0xF0, 0x3C, 0x07, 0x00, 0x38, 0x38, 0x00, 0x30, 0xC0, 0x00, 0xE6,
++  0x0F, 0xF1, 0x98, 0x73, 0xC7, 0xC3, 0x87, 0x0F, 0x0C, 0x1C, 0x3C, 0x30,
++  0x61, 0xF1, 0xC1, 0x86, 0xC7, 0x0E, 0x1B, 0x1C, 0x38, 0xEC, 0x3B, 0xEF,
++  0x38, 0xFD, 0xF8, 0x70, 0xC1, 0x80, 0xE0, 0x00, 0x01, 0xC0, 0x10, 0x03,
++  0xFF, 0xC0, 0x03, 0xFF, 0x00, 0x03, 0xC0, 0x07, 0xC0, 0x07, 0xE0, 0x07,
++  0xE0, 0x0F, 0xE0, 0x0E, 0xF0, 0x0E, 0xF0, 0x1E, 0x70, 0x1C, 0x78, 0x1C,
++  0x78, 0x3C, 0x38, 0x3F, 0xFC, 0x3F, 0xFC, 0x7F, 0xFC, 0x70, 0x1E, 0xF0,
++  0x1E, 0xF0, 0x0E, 0xE0, 0x0F, 0xFF, 0x03, 0xFF, 0xCF, 0xFF, 0xBC, 0x7E,
++  0xF0, 0x3B, 0xC0, 0xEF, 0x03, 0xBF, 0xFE, 0xFF, 0xE3, 0xFF, 0xCF, 0x0F,
++  0xBC, 0x0F, 0xF0, 0x1F, 0xC0, 0xFF, 0x03, 0xFF, 0xFE, 0xFF, 0xFB, 0xFF,
++  0x80, 0x03, 0xC0, 0x1F, 0xF0, 0xFF, 0xF1, 0xF1, 0xE7, 0x81, 0xEF, 0x01,
++  0xFC, 0x00, 0x78, 0x00, 0xF0, 0x01, 0xE0, 0x03, 0xC0, 0x07, 0x80, 0x0F,
++  0x00, 0xEF, 0x01, 0xDE, 0x07, 0x9F, 0xFE, 0x1F, 0xFC, 0x1F, 0xE0, 0x04,
++  0x00, 0xFE, 0x03, 0xFF, 0x8F, 0xFF, 0x38, 0x7E, 0xE0, 0x7B, 0x80, 0xFE,
++  0x03, 0xF8, 0x07, 0xE0, 0x1F, 0x80, 0x7E, 0x01, 0xF8, 0x07, 0xE0, 0x3F,
++  0x80, 0xFE, 0x07, 0xBF, 0xFE, 0xFF, 0xF3, 0xFF, 0x00, 0xFF, 0xFF, 0xFF,
++  0xFF, 0xFF, 0xE0, 0x0F, 0x00, 0x78, 0x03, 0xC0, 0x1F, 0xFE, 0xFF, 0xF7,
++  0xFF, 0xBC, 0x01, 0xE0, 0x0F, 0x00, 0x78, 0x03, 0xC0, 0x1F, 0xFF, 0xFF,
++  0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0xE0, 0x0E, 0x00,
++  0xE0, 0x0F, 0xFE, 0xFF, 0xEF, 0xFE, 0xE0, 0x0E, 0x00, 0xE0, 0x0E, 0x00,
++  0xE0, 0x0E, 0x00, 0xE0, 0x0E, 0x00, 0x03, 0xE0, 0x0F, 0xF8, 0x1F, 0xFC,
++  0x3E, 0x3E, 0x78, 0x0F, 0x70, 0x0F, 0xF0, 0x00, 0xF0, 0x00, 0xF0, 0x00,
++  0xF0, 0x7F, 0xF0, 0x7F, 0xF0, 0x7F, 0xF0, 0x07, 0x78, 0x0F, 0x7C, 0x1F,
++  0x3F, 0xFF, 0x1F, 0xFB, 0x0F, 0xF3, 0xE0, 0x3F, 0x80, 0xFE, 0x03, 0xF8,
++  0x0F, 0xE0, 0x3F, 0x80, 0xFE, 0x03, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
++  0x03, 0xF8, 0x0F, 0xE0, 0x3F, 0x80, 0xFE, 0x03, 0xF8, 0x0F, 0xE0, 0x3F,
++  0x80, 0xF0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC, 0x01, 0xE0, 0x3C,
++  0x07, 0x80, 0xF0, 0x1E, 0x03, 0xC0, 0x78, 0x0F, 0x01, 0xE0, 0x3C, 0x07,
++  0x80, 0xFE, 0x1F, 0xC3, 0xF8, 0x7F, 0xFE, 0xFF, 0xCF, 0xF0, 0x00, 0x00,
++  0xE0, 0x3D, 0xC0, 0xFB, 0x83, 0xE7, 0x07, 0x8E, 0x1E, 0x1C, 0x78, 0x39,
++  0xE0, 0x77, 0x80, 0xFF, 0x01, 0xFF, 0x03, 0xFE, 0x07, 0x9E, 0x0E, 0x1E,
++  0x1C, 0x1E, 0x38, 0x3C, 0x70, 0x3C, 0xE0, 0x3D, 0xC0, 0x3C, 0xF0, 0x0F,
++  0x00, 0xF0, 0x0F, 0x00, 0xF0, 0x0F, 0x00, 0xF0, 0x0F, 0x00, 0xF0, 0x0F,
++  0x00, 0xF0, 0x0F, 0x00, 0xF0, 0x0F, 0x00, 0xF0, 0x0F, 0xFF, 0xFF, 0xFF,
++  0xFF, 0xF8, 0x1F, 0xFC, 0x0F, 0xFE, 0x07, 0xFF, 0x83, 0xFF, 0xC3, 0xFF,
++  0xE1, 0xFF, 0xB0, 0xFF, 0xDC, 0x6F, 0xEE, 0x77, 0xF7, 0x3B, 0xF9, 0x9D,
++  0xFC, 0xCC, 0xFE, 0x76, 0x7F, 0x3F, 0x3F, 0x8F, 0x9F, 0xC7, 0xCF, 0xE3,
++  0xC7, 0xF1, 0xE3, 0xC0, 0xE0, 0x3F, 0xC0, 0xFF, 0x03, 0xFE, 0x0F, 0xFC,
++  0x3F, 0xF0, 0xFE, 0xE3, 0xFB, 0x8F, 0xE7, 0x3F, 0x9E, 0xFE, 0x3B, 0xF8,
++  0xFF, 0xE1, 0xFF, 0x83, 0xFE, 0x0F, 0xF8, 0x1F, 0xE0, 0x7F, 0x80, 0xF0,
++  0x03, 0xE0, 0x07, 0xFC, 0x07, 0xFF, 0x07, 0xCF, 0xC7, 0x81, 0xF3, 0xC0,
++  0x7B, 0xC0, 0x1D, 0xE0, 0x0F, 0xF0, 0x07, 0xF8, 0x03, 0xFC, 0x01, 0xFE,
++  0x00, 0xFF, 0x00, 0x73, 0xC0, 0x79, 0xF0, 0x7C, 0x7F, 0xFC, 0x1F, 0xFC,
++  0x07, 0xFC, 0x00, 0x20, 0x00, 0xFF, 0x07, 0xFF, 0x3F, 0xFD, 0xC3, 0xFE,
++  0x07, 0xF0, 0x1F, 0x80, 0xFC, 0x0F, 0xE0, 0xFF, 0xFF, 0xBF, 0xF9, 0xFF,
++  0x0E, 0x00, 0x70, 0x03, 0x80, 0x1C, 0x00, 0xE0, 0x07, 0x00, 0x00, 0x03,
++  0xE0, 0x07, 0xFC, 0x07, 0xFF, 0x07, 0xCF, 0xC7, 0x80, 0xF3, 0xC0, 0x7B,
++  0xC0, 0x1F, 0xE0, 0x0F, 0xF0, 0x07, 0xF8, 0x03, 0xFC, 0x01, 0xFE, 0x04,
++  0xFF, 0x07, 0x73, 0xC3, 0xF9, 0xF0, 0xFC, 0x7F, 0xFC, 0x1F, 0xFF, 0x07,
++  0xFF, 0xC0, 0x20, 0xC0, 0xFF, 0x83, 0xFF, 0xCF, 0xFF, 0xBC, 0x3F, 0xF0,
++  0x3F, 0xC0, 0xFF, 0x03, 0xFC, 0x0F, 0xFF, 0xFB, 0xFF, 0x8F, 0xFF, 0xBC,
++  0x1E, 0xF0, 0x3B, 0xC0, 0xEF, 0x03, 0xBC, 0x0E, 0xF0, 0x3F, 0xC0, 0xF0,
++  0x0F, 0x80, 0xFF, 0xC7, 0xFF, 0xBE, 0x1E, 0xF0, 0x3B, 0xC0, 0xFF, 0x00,
++  0x3F, 0x80, 0x7F, 0xE0, 0xFF, 0xE0, 0x3F, 0xC0, 0x0F, 0x00, 0x1F, 0x80,
++  0x7F, 0x03, 0xFF, 0x1F, 0x7F, 0xF8, 0xFF, 0xC0, 0x00, 0x00, 0xFF, 0xFF,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xE0, 0x03, 0x80, 0x0E, 0x00, 0x38, 0x00, 0xE0,
++  0x03, 0x80, 0x0E, 0x00, 0x38, 0x00, 0xE0, 0x03, 0x80, 0x0E, 0x00, 0x38,
++  0x00, 0xE0, 0x03, 0x80, 0x0E, 0x00, 0xE0, 0x3F, 0x80, 0xFE, 0x03, 0xF8,
++  0x0F, 0xE0, 0x3F, 0x80, 0xFE, 0x03, 0xF8, 0x0F, 0xE0, 0x3F, 0x80, 0xFE,
++  0x03, 0xF8, 0x0F, 0xE0, 0x3F, 0xC0, 0xFF, 0x07, 0x9F, 0xFE, 0x7F, 0xF0,
++  0x7F, 0x80, 0x20, 0x00, 0xE0, 0x1F, 0xC0, 0x3B, 0xC0, 0xF3, 0x81, 0xE7,
++  0x03, 0x8F, 0x0F, 0x0E, 0x1C, 0x1C, 0x38, 0x3C, 0x70, 0x39, 0xC0, 0x73,
++  0x80, 0xE7, 0x00, 0xFC, 0x01, 0xF8, 0x03, 0xF0, 0x03, 0xC0, 0x07, 0x80,
++  0x0F, 0x00, 0xF0, 0x38, 0x1D, 0xC1, 0xE0, 0xF7, 0x87, 0xC3, 0xDE, 0x1F,
++  0x0F, 0x78, 0x7C, 0x38, 0xE3, 0xB0, 0xE3, 0x8E, 0xC7, 0x8F, 0x3B, 0x9C,
++  0x1C, 0xEE, 0x70, 0x73, 0x39, 0xC1, 0xDC, 0x67, 0x07, 0x71, 0xB8, 0x0F,
++  0xC7, 0xE0, 0x3E, 0x1F, 0x80, 0xF8, 0x3E, 0x01, 0xE0, 0xF0, 0x07, 0x83,
++  0xC0, 0x1E, 0x0F, 0x00, 0xF0, 0x3D, 0xF0, 0x79, 0xE1, 0xE1, 0xE3, 0xC3,
++  0xCF, 0x03, 0xFC, 0x07, 0xF8, 0x07, 0xE0, 0x07, 0x80, 0x0F, 0x00, 0x3F,
++  0x00, 0x7F, 0x01, 0xFE, 0x07, 0x9E, 0x0F, 0x3C, 0x3C, 0x3C, 0xF8, 0x3D,
++  0xE0, 0x78, 0xF0, 0x1F, 0xE0, 0x79, 0xE0, 0xF3, 0xC3, 0xC3, 0xC7, 0x87,
++  0x9E, 0x07, 0x3C, 0x0F, 0x70, 0x0F, 0xE0, 0x1F, 0x80, 0x1F, 0x00, 0x3C,
++  0x00, 0x78, 0x00, 0xF0, 0x01, 0xE0, 0x03, 0xC0, 0x07, 0x80, 0x0F, 0x00,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xF0, 0x0F, 0x00, 0xF0, 0x0F, 0x80,
++  0x78, 0x07, 0x80, 0x78, 0x07, 0x80, 0x7C, 0x03, 0xC0, 0x3C, 0x03, 0xC0,
++  0x1F, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0xFF, 0xFF, 0xCE, 0x73, 0x9C, 0xE7,
++  0x39, 0xCE, 0x73, 0x9C, 0xE7, 0x39, 0xCF, 0xFF, 0xE0, 0xC1, 0x81, 0x02,
++  0x06, 0x04, 0x08, 0x18, 0x30, 0x20, 0x60, 0xC0, 0x81, 0x83, 0x02, 0x06,
++  0xFF, 0xFF, 0xC7, 0x1C, 0x71, 0xC7, 0x1C, 0x71, 0xC7, 0x1C, 0x71, 0xC7,
++  0x1C, 0x71, 0xC7, 0xFF, 0xFF, 0xC0, 0x0F, 0x00, 0xF0, 0x0F, 0x01, 0xF8,
++  0x1B, 0x83, 0x9C, 0x39, 0xC3, 0x0C, 0x70, 0xE7, 0x0E, 0xE0, 0x70, 0xFF,
++  0xFF, 0xFF, 0xFC, 0x71, 0x86, 0x3F, 0x87, 0xFC, 0xFF, 0xEE, 0x1E, 0x01,
++  0xE0, 0xFE, 0x7F, 0xEF, 0x8E, 0xE1, 0xEE, 0x1E, 0xF3, 0xEF, 0xFE, 0x7E,
++  0xE1, 0x00, 0xF0, 0x07, 0x80, 0x3C, 0x01, 0xE0, 0x0F, 0x00, 0x7B, 0xE3,
++  0xFF, 0x9F, 0xFE, 0xF8, 0xF7, 0x83, 0xFC, 0x1F, 0xE0, 0xFF, 0x07, 0xF8,
++  0x3F, 0xC1, 0xDF, 0x9E, 0xFF, 0xE7, 0xFE, 0x00, 0x40, 0x1F, 0x83, 0xFC,
++  0x7F, 0xEF, 0x0E, 0xE0, 0xEE, 0x00, 0xE0, 0x0E, 0x00, 0xE0, 0x0F, 0x0E,
++  0x79, 0xE7, 0xFC, 0x3F, 0x80, 0x00, 0x00, 0x70, 0x07, 0x00, 0x70, 0x07,
++  0x00, 0x71, 0xE7, 0x3F, 0xF7, 0xFF, 0xF0, 0xFE, 0x0F, 0xE0, 0x7E, 0x07,
++  0xE0, 0x7E, 0x0F, 0xF0, 0xF7, 0x9F, 0x7F, 0xF3, 0xF7, 0x00, 0x00, 0x1F,
++  0x07, 0xFC, 0x7B, 0xEE, 0x0E, 0xE0, 0xEF, 0xFE, 0xFF, 0xFF, 0xFF, 0xE0,
++  0x0E, 0x0E, 0xF1, 0xE7, 0xFC, 0x3F, 0x80, 0x40, 0x00, 0x1E, 0x3E, 0x3C,
++  0x3C, 0xFF, 0xFF, 0xFF, 0x3C, 0x3C, 0x3C, 0x3C, 0x3C, 0x3C, 0x3C, 0x3C,
++  0x3C, 0x3C, 0x1E, 0x73, 0xF7, 0x7F, 0xFF, 0x0F, 0xF0, 0xFE, 0x07, 0xE0,
++  0x7E, 0x07, 0xE0, 0x7F, 0x0F, 0x79, 0xF7, 0xFF, 0x3F, 0x70, 0x07, 0x00,
++  0x7F, 0x0F, 0x7F, 0xE3, 0xFC, 0xE0, 0x1C, 0x03, 0x80, 0x70, 0x0E, 0x01,
++  0xDF, 0x3F, 0xF7, 0xFF, 0xF1, 0xFC, 0x1F, 0x83, 0xF0, 0x7E, 0x0F, 0xC1,
++  0xF8, 0x3F, 0x07, 0xE0, 0xFC, 0x1C, 0xFF, 0xF1, 0xFF, 0xFF, 0xFF, 0xFF,
++  0xFC, 0x39, 0xCE, 0x70, 0x1C, 0xE7, 0x39, 0xCE, 0x73, 0x9C, 0xE7, 0x39,
++  0xCE, 0x7F, 0xFF, 0xC0, 0xF0, 0x0F, 0x00, 0xF0, 0x0F, 0x00, 0xF0, 0x0F,
++  0x0E, 0xF1, 0xEF, 0x3C, 0xF7, 0x8F, 0xF0, 0xFF, 0x0F, 0xF0, 0xFF, 0x8F,
++  0x3C, 0xF3, 0xCF, 0x1E, 0xF1, 0xEF, 0x0F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
++  0xFF, 0xFC, 0xF7, 0xCF, 0x9F, 0xFF, 0xFB, 0xFF, 0xFF, 0xF8, 0x78, 0xFF,
++  0x0E, 0x1F, 0xE1, 0xC3, 0xFC, 0x38, 0x7F, 0x87, 0x0F, 0xF0, 0xE1, 0xFE,
++  0x1C, 0x3F, 0xC3, 0x87, 0xF8, 0x70, 0xFF, 0x0E, 0x1E, 0xEF, 0x9F, 0xFB,
++  0xFF, 0xF8, 0xFE, 0x0F, 0xC1, 0xF8, 0x3F, 0x07, 0xE0, 0xFC, 0x1F, 0x83,
++  0xF0, 0x7E, 0x0E, 0x1F, 0x81, 0xFF, 0x1F, 0xFD, 0xE1, 0xEF, 0x07, 0x70,
++  0x3F, 0x81, 0xFC, 0x0F, 0xE0, 0x7F, 0x83, 0x9E, 0x3C, 0xFF, 0xC3, 0xFC,
++  0x01, 0x00, 0xF7, 0xC7, 0xFF, 0x3F, 0xFD, 0xF1, 0xEF, 0x07, 0xF8, 0x3F,
++  0xC1, 0xFE, 0x0F, 0xF0, 0x7F, 0x83, 0xBE, 0x3D, 0xFF, 0xCF, 0x7C, 0x78,
++  0x83, 0xC0, 0x1E, 0x00, 0xF0, 0x07, 0x80, 0x00, 0x1E, 0x77, 0xF7, 0x7F,
++  0xFF, 0x0F, 0xE0, 0xFE, 0x07, 0xE0, 0x7E, 0x07, 0xE0, 0xFF, 0x0F, 0xF9,
++  0xF7, 0xFF, 0x3F, 0x70, 0x47, 0x00, 0x70, 0x07, 0x00, 0x70, 0x07, 0xEF,
++  0xFF, 0xFF, 0x8E, 0x1C, 0x38, 0x70, 0xE1, 0xC3, 0x87, 0x0E, 0x00, 0x3F,
++  0x8F, 0xFB, 0xEF, 0xF8, 0x7F, 0x01, 0xFE, 0x1F, 0xF0, 0xFF, 0x01, 0xFC,
++  0x1F, 0xC3, 0xFF, 0xF7, 0xFC, 0x08, 0x00, 0x38, 0x70, 0xE7, 0xFF, 0xFF,
++  0xCE, 0x1C, 0x38, 0x70, 0xE1, 0xC3, 0x87, 0x0F, 0x8F, 0x04, 0xF0, 0x7F,
++  0x07, 0xF0, 0x7F, 0x07, 0xF0, 0x7F, 0x07, 0xF0, 0x7F, 0x07, 0xF0, 0x7F,
++  0x0F, 0x79, 0xF7, 0xFF, 0x3F, 0x70, 0x80, 0xF0, 0x7B, 0x83, 0x9E, 0x1C,
++  0x71, 0xE3, 0x8E, 0x1E, 0x70, 0x73, 0x83, 0xB8, 0x1D, 0xC0, 0x7E, 0x03,
++  0xE0, 0x1F, 0x00, 0x78, 0x00, 0xF0, 0xE1, 0xDC, 0x78, 0x77, 0x1F, 0x3D,
++  0xC7, 0xCE, 0x79, 0xF3, 0x8E, 0xEC, 0xE3, 0xBB, 0x78, 0xEC, 0xFC, 0x1F,
++  0x3F, 0x07, 0xCF, 0xC1, 0xF1, 0xE0, 0x7C, 0x78, 0x0E, 0x1E, 0x00, 0x78,
++  0xF3, 0xC7, 0x8F, 0x78, 0x3B, 0x81, 0xFC, 0x07, 0xC0, 0x1E, 0x01, 0xF0,
++  0x1F, 0xC0, 0xEF, 0x0F, 0x78, 0xF1, 0xE7, 0x87, 0x80, 0xF0, 0x7B, 0x83,
++  0x9E, 0x1C, 0xF1, 0xE3, 0x8E, 0x1E, 0x70, 0x73, 0x83, 0xB8, 0x1D, 0xC0,
++  0x7E, 0x03, 0xE0, 0x1F, 0x00, 0x78, 0x03, 0x80, 0x1C, 0x01, 0xE0, 0x3E,
++  0x01, 0xE0, 0x00, 0xFF, 0xFF, 0xFF, 0xFC, 0x1E, 0x0F, 0x83, 0xC1, 0xE0,
++  0xF0, 0x78, 0x3C, 0x0F, 0xFF, 0xFF, 0xFF, 0xC0, 0x06, 0x3C, 0xF9, 0xC3,
++  0x87, 0x0E, 0x1C, 0x38, 0x73, 0xC7, 0x0F, 0x07, 0x0E, 0x1C, 0x38, 0x70,
++  0xE1, 0xC3, 0xE7, 0xC7, 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC, 0xC3,
++  0xCF, 0x0C, 0x38, 0xE3, 0x8E, 0x38, 0xE3, 0xC7, 0x3C, 0xE3, 0x8E, 0x38,
++  0xE3, 0x8E, 0xF3, 0xCE, 0x00, 0x10, 0x0F, 0x85, 0xBD, 0xE1, 0xF0, 0x08,
++  0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80, 0xFC,
++  0x07, 0xE0, 0x3F, 0x01, 0xF8, 0x0F, 0xC0, 0x7E, 0x03, 0xF0, 0x1F, 0x80,
++  0xFC, 0x07, 0xFF, 0xFF, 0xFF, 0xC0 };
++
++const GFXglyph ubitxGlyphs[] PROGMEM = {
++  {     0,  13,  18,  17,    2,  -17 },   // 0x14
++  {    30,  13,  18,  17,    2,  -17 },   // 0x15
++  {    60,  13,  18,  17,    2,  -17 },   // 0x16
++  {    90,  13,  18,  17,    2,  -17 },   // 0x17
++  {   120,  13,  18,  17,    2,  -17 },   // 0x18
++  {   150,  13,  18,  17,    2,  -17 },   // 0x19
++  {   180,  13,  18,  17,    2,  -17 },   // 0x1A
++  {   210,  13,  18,  17,    2,  -17 },   // 0x1B
++  {   240,  13,  18,  17,    2,  -17 },   // 0x1C
++  {   270,  13,  18,  17,    2,  -17 },   // 0x1D
++  {   300,  13,  18,  17,    2,  -17 },   // 0x1E
++  {   330,  13,  18,  17,    2,  -17 },   // 0x1F
++  {   360,   0,   0,   7,    0,    1 },   // 0x20 ' '
++  {   360,   3,  17,   8,    3,  -16 },   // 0x21 '!'
++  {   367,   9,   7,  11,    1,  -17 },   // 0x22 '"'
++  {   375,  13,  18,  13,    0,  -16 },   // 0x23 '#'
++  {   405,  12,  21,  13,    1,  -17 },   // 0x24 '$'
++  {   437,  20,  17,  21,    1,  -16 },   // 0x25 '%'
++  {   480,  16,  18,  17,    1,  -16 },   // 0x26 '&'
++  {   516,   4,   7,   6,    1,  -17 },   // 0x27 '''
++  {   520,   6,  23,   8,    1,  -17 },   // 0x28 '('
++  {   538,   6,  23,   8,    1,  -17 },   // 0x29 ')'
++  {   556,   8,   8,   9,    1,  -17 },   // 0x2A '*'
++  {   564,  12,  11,  14,    1,  -10 },   // 0x2B '+'
++  {   581,   3,   8,   7,    2,   -3 },   // 0x2C ','
++  {   584,   6,   3,   8,    1,   -7 },   // 0x2D '-'
++  {   587,   3,   4,   7,    2,   -3 },   // 0x2E '.'
++  {   589,   7,  17,   7,    0,  -16 },   // 0x2F '/'
++  {   604,  11,  18,  13,    1,  -16 },   // 0x30 '0'
++  {   629,   7,  17,  13,    2,  -16 },   // 0x31 '1'
++  {   644,  11,  17,  13,    1,  -16 },   // 0x32 '2'
++  {   668,  11,  18,  13,    1,  -16 },   // 0x33 '3'
++  {   693,  12,  17,  13,    1,  -16 },   // 0x34 '4'
++  {   719,  11,  18,  13,    1,  -16 },   // 0x35 '5'
++  {   744,  11,  18,  13,    1,  -16 },   // 0x36 '6'
++  {   769,  12,  17,  13,    1,  -16 },   // 0x37 '7'
++  {   795,  12,  18,  13,    1,  -16 },   // 0x38 '8'
++  {   822,  11,  18,  13,    1,  -16 },   // 0x39 '9'
++  {   847,   3,  12,   8,    3,  -11 },   // 0x3A ':'
++  {   852,   3,  16,   8,    3,  -11 },   // 0x3B ';'
++  {   858,  12,  11,  14,    1,  -10 },   // 0x3C '<'
++  {   875,  12,   9,  14,    1,   -9 },   // 0x3D '='
++  {   889,  12,  11,  14,    1,  -10 },   // 0x3E '>'
++  {   906,  11,  18,  15,    2,  -17 },   // 0x3F '?'
++  {   931,  22,  21,  23,    1,  -17 },   // 0x40 '@'
++  {   989,  16,  18,  17,    1,  -17 },   // 0x41 'A'
++  {  1025,  14,  18,  17,    2,  -17 },   // 0x42 'B'
++  {  1057,  15,  19,  17,    1,  -17 },   // 0x43 'C'
++  {  1093,  14,  18,  17,    2,  -17 },   // 0x44 'D'
++  {  1125,  13,  18,  16,    2,  -17 },   // 0x45 'E'
++  {  1155,  12,  18,  15,    2,  -17 },   // 0x46 'F'
++  {  1182,  16,  18,  19,    1,  -17 },   // 0x47 'G'
++  {  1218,  14,  18,  17,    2,  -17 },   // 0x48 'H'
++  {  1250,   3,  18,   7,    2,  -17 },   // 0x49 'I'
++  {  1257,  11,  19,  13,    1,  -17 },   // 0x4A 'J'
++  {  1284,  15,  18,  17,    2,  -17 },   // 0x4B 'K'
++  {  1318,  12,  18,  15,    2,  -17 },   // 0x4C 'L'
++  {  1345,  17,  18,  20,    2,  -17 },   // 0x4D 'M'
++  {  1384,  14,  18,  17,    2,  -17 },   // 0x4E 'N'
++  {  1416,  17,  19,  19,    1,  -17 },   // 0x4F 'O'
++  {  1457,  13,  18,  16,    2,  -17 },   // 0x50 'P'
++  {  1487,  17,  19,  19,    1,  -17 },   // 0x51 'Q'
++  {  1528,  14,  18,  17,    2,  -17 },   // 0x52 'R'
++  {  1560,  14,  19,  16,    1,  -17 },   // 0x53 'S'
++  {  1594,  14,  18,  15,    0,  -17 },   // 0x54 'T'
++  {  1626,  14,  19,  17,    2,  -17 },   // 0x55 'U'
++  {  1660,  15,  18,  16,    1,  -17 },   // 0x56 'V'
++  {  1694,  22,  18,  23,    0,  -17 },   // 0x57 'W'
++  {  1744,  15,  18,  16,    1,  -17 },   // 0x58 'X'
++  {  1778,  15,  18,  16,    1,  -17 },   // 0x59 'Y'
++  {  1812,  13,  18,  15,    1,  -17 },   // 0x5A 'Z'
++  {  1842,   5,  23,   8,    2,  -17 },   // 0x5B '['
++  {  1857,   7,  17,   7,    0,  -16 },   // 0x5C '\'
++  {  1872,   6,  23,   8,    0,  -17 },   // 0x5D ']'
++  {  1890,  12,  11,  14,    1,  -16 },   // 0x5E '^'
++  {  1907,  15,   2,  13,   -1,    4 },   // 0x5F '_'
++  {  1911,   5,   3,   8,    0,  -17 },   // 0x60 '`'
++  {  1913,  12,  14,  13,    1,  -12 },   // 0x61 'a'
++  {  1934,  13,  19,  15,    1,  -17 },   // 0x62 'b'
++  {  1965,  12,  14,  13,    1,  -12 },   // 0x63 'c'
++  {  1986,  12,  19,  15,    1,  -17 },   // 0x64 'd'
++  {  2015,  12,  14,  13,    1,  -12 },   // 0x65 'e'
++  {  2036,   8,  18,   8,    0,  -17 },   // 0x66 'f'
++  {  2054,  12,  18,  15,    1,  -12 },   // 0x67 'g'
++  {  2081,  11,  18,  15,    2,  -17 },   // 0x68 'h'
++  {  2106,   3,  18,   7,    2,  -17 },   // 0x69 'i'
++  {  2113,   5,  23,   7,    0,  -17 },   // 0x6A 'j'
++  {  2128,  12,  18,  13,    1,  -17 },   // 0x6B 'k'
++  {  2155,   3,  18,   7,    2,  -17 },   // 0x6C 'l'
++  {  2162,  19,  13,  21,    1,  -12 },   // 0x6D 'm'
++  {  2193,  11,  13,  15,    2,  -12 },   // 0x6E 'n'
++  {  2211,  13,  14,  15,    1,  -12 },   // 0x6F 'o'
++  {  2234,  13,  18,  15,    1,  -12 },   // 0x70 'p'
++  {  2264,  12,  18,  15,    1,  -12 },   // 0x71 'q'
++  {  2291,   7,  13,   9,    2,  -12 },   // 0x72 'r'
++  {  2303,  11,  14,  13,    1,  -12 },   // 0x73 's'
++  {  2323,   7,  17,   8,    0,  -15 },   // 0x74 't'
++  {  2338,  12,  14,  15,    1,  -12 },   // 0x75 'u'
++  {  2359,  13,  13,  13,    0,  -12 },   // 0x76 'v'
++  {  2381,  18,  13,  19,    0,  -12 },   // 0x77 'w'
++  {  2411,  13,  13,  13,    0,  -12 },   // 0x78 'x'
++  {  2433,  13,  18,  13,    0,  -12 },   // 0x79 'y'
++  {  2463,  10,  13,  12,    1,  -12 },   // 0x7A 'z'
++  {  2480,   7,  23,   9,    1,  -17 },   // 0x7B '{'
++  {  2501,   2,  23,   7,    2,  -17 },   // 0x7C '|'
++  {  2507,   6,  23,   9,    2,  -17 },   // 0x7D '}'
++  {  2525,  11,   5,  14,    1,   -7 },   // 0x7E '~'
++  {  2532,  13,  18,  17,    2,  -17 } }; // 0x7F
++
++const GFXfont ubitx_font PROGMEM = {
++  (uint8_t  *)ubitxBitmaps,
++  (GFXglyph *)ubitxGlyphs,
++  0x14, 0x7F, 33 };
++
++// Approx. 3325 bytes
++
++// Color definitions
++#define DISPLAY_BLACK       0x0000  ///<   0,   0,   0
++#define DISPLAY_NAVY        0x000F  ///<   0,   0, 123
++#define DISPLAY_DARKGREEN   0x03E0  ///<   0, 125,   0
++#define DISPLAY_DARKCYAN    0x03EF  ///<   0, 125, 123
++#define DISPLAY_MAROON      0x7800  ///< 123,   0,   0
++#define DISPLAY_PURPLE      0x780F  ///< 123,   0, 123
++#define DISPLAY_OLIVE       0x7BE0  ///< 123, 125,   0
++#define DISPLAY_LIGHTGREY   0xC618  ///< 198, 195, 198
++#define DISPLAY_DARKGREY    0x7BEF  ///< 123, 125, 123
++#define DISPLAY_BLUE        0x001F  ///<   0,   0, 255
++#define DISPLAY_GREEN       0x07E0  ///<   0, 255,   0
++#define DISPLAY_CYAN        0x07FF  ///<   0, 255, 255
++#define DISPLAY_RED         0xF800  ///< 255,   0,   0
++#define DISPLAY_MAGENTA     0xF81F  ///< 255,   0, 255
++#define DISPLAY_YELLOW      0xFFE0  ///< 255, 255,   0
++#define DISPLAY_WHITE       0xFFFF  ///< 255, 255, 255
++#define DISPLAY_ORANGE      0xFD20  ///< 255, 165,   0
++#define DISPLAY_GREENYELLOW 0xAFE5  ///< 173, 255,  41
++#define DISPLAY_PINK        0xFC18  ///< 255, 130, 198
++
++#endif // _NANO_GUI_H_
++
++
+diff --git a/ubitx_v6.1_code/setup.cpp b/ubitx_v6.1_code/setup.cpp
+new file mode 100644
+index 0000000..cad9541
+--- /dev/null
++++ b/ubitx_v6.1_code/setup.cpp
+@@ -0,0 +1,304 @@
++#include <Arduino.h>
++#include <EEPROM.h>
++#include "morse.h"
++#include "ubitx.h"
++#include "nano_gui.h"
++
++/** Menus
++ *  The Radio menus are accessed by tapping on the function button. 
++ *  - The main loop() constantly looks for a button press and calls doMenu() when it detects
++ *  a function button press. 
++ *  - As the encoder is rotated, at every 10th pulse, the next or the previous menu
++ *  item is displayed. Each menu item is controlled by it's own function.
++ *  - Eache menu function may be called to display itself
++ *  - Each of these menu routines is called with a button parameter. 
++ *  - The btn flag denotes if the menu itme was clicked on or not.
++ *  - If the menu item is clicked on, then it is selected,
++ *  - If the menu item is NOT clicked on, then the menu's prompt is to be displayed
++ */
++
++void setupExit(){
++  menuOn = 0;
++}
++
++ //this is used by the si5351 routines in the ubitx_5351 file
++extern int32_t calibration;
++extern uint32_t si5351bx_vcoa;
++
++void setupFreq(){
++  int knob = 0;
++  int32_t prev_calibration;
++
++  displayDialog("Set Frequency", "Push TUNE to Save"); 
++
++  //round off the the nearest khz
++  frequency = (frequency/1000l)* 1000l;
++  setFrequency(frequency);
++  
++  displayRawText("You should have a", 20, 50, DISPLAY_CYAN, DISPLAY_NAVY);
++  displayRawText("signal exactly at ", 20, 75, DISPLAY_CYAN, DISPLAY_NAVY);
++  ltoa(frequency/1000l, c, 10);
++  strcat(c, " KHz");
++  displayRawText(c, 20, 100, DISPLAY_CYAN, DISPLAY_NAVY);
++
++  displayRawText("Rotate to zerobeat", 20, 180, DISPLAY_CYAN, DISPLAY_NAVY);
++  //keep clear of any previous button press
++  while (btnDown())
++    active_delay(100);
++  active_delay(100);
++   
++  prev_calibration = calibration;
++  calibration = 0;
++
++//  ltoa(calibration/8750, c, 10);
++//  strcpy(b, c);
++//  strcat(b, "Hz");
++//  printLine2(b);     
++
++  while (!btnDown())
++  {
++   knob = enc_read();
++   if (knob != 0)
++      calibration += knob * 875;
++ /*   else if (knob < 0)
++      calibration -= 875; */
++    else  
++      continue; //don't update the frequency or the display
++ 
++    si5351bx_setfreq(0, usbCarrier);  //set back the cardrier oscillator anyway, cw tx switches it off  
++    si5351_set_calibration(calibration);
++    setFrequency(frequency);
++
++    //displayRawText("Rotate to zerobeat", 20, 120, DISPLAY_CYAN, DISPLAY_NAVY);
++    
++    ltoa(calibration, b, 10);
++    displayText(b, 100, 140, 100, 26, DISPLAY_CYAN, DISPLAY_NAVY, DISPLAY_WHITE);
++  }
++
++  EEPROM.put(MASTER_CAL, calibration);
++  initOscillators();
++  si5351_set_calibration(calibration);
++  setFrequency(frequency);    
++
++  //debounce and delay
++  while(btnDown())
++    active_delay(50);
++  active_delay(100);
++}
++
++void setupBFO(){
++  int knob = 0;
++  unsigned long prevCarrier;
++   
++  prevCarrier = usbCarrier;
++
++  displayDialog("Set BFO", "Press TUNE to Save"); 
++  
++  //usbCarrier = 11053000l;
++  usbCarrier = 11056900l; //GPB.20200321A
++  si5351bx_setfreq(0, usbCarrier);
++  printCarrierFreq(usbCarrier);
++
++  while (!btnDown()){
++    knob = enc_read();
++
++    if (knob != 0)
++      usbCarrier -= 50 * knob;
++    else
++      continue; //don't update the frequency or the display
++      
++    si5351bx_setfreq(0, usbCarrier);
++    setFrequency(frequency);
++    printCarrierFreq(usbCarrier);
++    
++    active_delay(100);
++  }
++
++  EEPROM.put(USB_CAL, usbCarrier);  
++  si5351bx_setfreq(0, usbCarrier);          
++  setFrequency(frequency);
++  updateDisplay();
++  menuOn = 0; 
++}
++
++void setupCwDelay(){
++  int knob = 0;
++  int prev_cw_delay;
++
++  displayDialog("Set CW T/R Delay", "Press tune to Save"); 
++
++  active_delay(500);
++  prev_cw_delay = cwDelayTime;
++
++  itoa(10 * (int)cwDelayTime, b, 10);
++  strcat(b, " msec");
++  displayText(b, 100, 100, 120, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_BLACK);
++
++  while (!btnDown()){
++    knob = enc_read();
++
++    if (knob < 0 && cwDelayTime > 10)
++      cwDelayTime -= 10;
++    else if (knob > 0 && cwDelayTime < 100)
++      cwDelayTime += 10;
++    else
++      continue; //don't update the frequency or the display
++
++    itoa(10 * (int)cwDelayTime, b, 10);
++    strcat(b, " msec");
++    displayText(b, 100, 100, 120, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_BLACK);
++      
++  }
++
++  EEPROM.put(CW_DELAYTIME, cwDelayTime);
++
++  
++//  cwDelayTime = getValueByKnob(10, 1000, 50,  cwDelayTime, "CW Delay>", " msec");
++
++  active_delay(500);
++  menuOn = 0;
++}
++
++void setupKeyer(){
++  int tmp_key, knob;
++  
++  displayDialog("Set CW Keyer", "Press tune to Save"); 
++ 
++  if (!Iambic_Key)
++    displayText("< Hand Key >", 100, 100, 120, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_BLACK);
++  else if (keyerControl & IAMBICB)
++    displayText("< Iambic A >", 100, 100, 120, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_BLACK);
++  else 
++    displayText("< Iambic B >", 100, 100, 120, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_BLACK);
++
++  if (!Iambic_Key)
++    tmp_key = 0; //hand key
++  else if (keyerControl & IAMBICB)
++    tmp_key = 2; //Iambic B
++  else 
++    tmp_key = 1;
++ 
++  while (!btnDown())
++  {
++    knob = enc_read();
++    if (knob == 0){
++      active_delay(50);
++      continue;
++    }
++    if (knob < 0 && tmp_key > 0)
++      tmp_key--;
++    if (knob > 0)
++      tmp_key++;
++    if (tmp_key > 2)
++      tmp_key = 0;
++
++    if (tmp_key == 0)
++      displayText("< Hand Key >", 100, 100, 120, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_BLACK);
++    else if (tmp_key == 1)
++      displayText("< Iambic A >", 100, 100, 120, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_BLACK);
++    else if (tmp_key == 2)
++      displayText("< Iambic B >", 100, 100, 120, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_BLACK);
++  }
++
++  active_delay(500);
++  if (tmp_key == 0)
++    Iambic_Key = false;
++  else if (tmp_key == 1){
++    Iambic_Key = true;
++    keyerControl &= ~IAMBICB;
++  }
++  else if (tmp_key == 2){
++    Iambic_Key = true;
++    keyerControl |= IAMBICB;
++  }
++  
++  EEPROM.put(CW_KEY_TYPE, tmp_key);
++  
++  menuOn = 0;  
++}
++
++void drawSetupMenu(){
++  displayClear(DISPLAY_BLACK);
++ 
++  displayText("Setup", 10, 10, 300, 35, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_WHITE); 
++  displayRect(10,10,300,220, DISPLAY_WHITE);
++  
++  displayRawText("Set Freq...", 30, 50, DISPLAY_WHITE, DISPLAY_BLACK);       
++  displayRawText("Set BFO...", 30, 80, DISPLAY_WHITE, DISPLAY_BLACK);       
++  displayRawText("CW Delay...", 30, 110, DISPLAY_WHITE, DISPLAY_BLACK);       
++  displayRawText("CW Keyer...", 30, 140, DISPLAY_WHITE, DISPLAY_BLACK);       
++  displayRawText("Touch Screen...", 30, 170, DISPLAY_WHITE, DISPLAY_BLACK);       
++  displayRawText("Exit", 30, 200, DISPLAY_WHITE, DISPLAY_BLACK);       
++}
++
++static int prevPuck = -1;
++void movePuck(int i){
++  if (prevPuck >= 0)
++    displayRect(15, 49 + (prevPuck * 30), 290, 25, DISPLAY_BLACK); //NAVY //GPB.20200321A
++  displayRect(15, 49 + (i * 30), 290, 25, DISPLAY_YELLOW); //WHITE //GPB.20200321A
++  prevPuck = i;
++  
++}
++
++void doSetup2(){
++  int select=0, i,btnState;
++
++  drawSetupMenu();
++  movePuck(select);
++
++   //wait for the button to be raised up
++  while(btnDown())
++    active_delay(50);
++  active_delay(50);  //debounce
++  
++  menuOn = 2;
++ 
++  while (menuOn){
++    i = enc_read();
++
++    if (i > 0){
++      if (select + i < 60)
++        select += i;
++        movePuck(select/10);
++    }
++    if (i < 0 && select - i >= 0){
++      select += i;      //caught ya, i is already -ve here, so you add it
++      movePuck(select/10);
++    }
++
++    if (!btnDown()){
++      active_delay(50);
++      continue;
++    }
++
++    //wait for the touch to lift off and debounce
++    while(btnDown()){
++      active_delay(50);
++    }
++    active_delay(300);
++    
++    if (select < 10)
++     setupFreq();
++    else if (select < 20 )
++      setupBFO(); 
++    else if (select < 30 )
++      setupCwDelay(); 
++    else if (select < 40)
++        setupKeyer();
++    else if (select < 50)
++        setupTouch();
++    else
++      break; //exit setup was chosen
++      //setupExit();
++    //redraw
++    drawSetupMenu();
++  }
++
++  //debounce the button
++  while(btnDown())
++    active_delay(50);
++  active_delay(50);
++
++  checkCAT();
++  guiUpdate();
++}
+diff --git a/ubitx_v6.1_code/ubitx.h b/ubitx_v6.1_code/ubitx.h
+new file mode 100644
+index 0000000..018eae5
+--- /dev/null
++++ b/ubitx_v6.1_code/ubitx.h
+@@ -0,0 +1,222 @@
++
++/* The ubitx is powered by an arduino nano. The pin assignment is as folows 
++ *  
++ */
++
++#define ENC_A (A0)          // Tuning encoder interface
++#define ENC_B (A1)          // Tuning encoder interface
++#define FBUTTON (A2)        // Tuning encoder interface
++#define PTT   (A3)          // Sense it for ssb and as a straight key for cw operation
++#define ANALOG_KEYER (A6)   // This is used as keyer. The analog port has 4.7K pull up resistor. Details are in the circuit description on www.hfsignals.com
++#define ANALOG_SPARE (A7)   // Not used yet
++
++#define TX_RX (7)           // Pin from the Nano to the radio to switch to TX (HIGH) and RX(LOW)
++#define CW_TONE (6)         // Generates a square wave sidetone while sending the CW. 
++#define TX_LPF_A (5)        // The 30 MHz LPF is permanently connected in the output of the PA... 
++#define TX_LPF_B (4)        //  ...Alternatively, either 3.5 MHz, 7 MHz or 14 Mhz LPFs are...
++#define TX_LPF_C (3)        //  ...switched inline depending upon the TX frequency
++#define CW_KEY (2)          //  Pin goes high during CW keydown to transmit the carrier. 
++                            // ... The CW_KEY is needed in addition to the TX/RX key as the...
++                            // ...key can be up within a tx period
++
++
++/** pin assignments
++14  T_IRQ           2 std   changed
++13  T_DOUT              (parallel to SOD/MOSI, pin 9 of display)
++12  T_DIN               (parallel to SDI/MISO, pin 6 of display)
++11  T_CS            9   (we need to specify this)
++10  T_CLK               (parallel to SCK, pin 7 of display)
++9   SDO(MSIO) 12    12  (spi)
++8   LED       A0    8   (not needed, permanently on +3.3v) (resistor from 5v, 
++7   SCK       13    13  (spi)
++6   SDI       11    11  (spi)
++5   D/C       A3    7   (changable)
++4   RESET     A4    9 (not needed, permanently +5v)
++3   CS        A5    10  (changable)
++2   GND       GND
++1   VCC       VCC
++
++The model is called tjctm24028-spi
++it uses an ILI9341 display controller and an  XPT2046 touch controller.
++*/
++
++#define TFT_DC  9
++#define TFT_CS 10
++#define CS_PIN  8     //this is the pin to select the touch controller on spi interface
++// MOSI=11, MISO=12, SCK=13
++
++//XPT2046_Touchscreen ts(CS_PIN);
++
++//Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
++
++/**
++ * The Arduino, unlike C/C++ on a regular computer with gigabytes of RAM, has very little memory.
++ * We have to be very careful with variables that are declared inside the functions as they are 
++ * created in a memory region called the stack. The stack has just a few bytes of space on the Arduino
++ * if you declare large strings inside functions, they can easily exceed the capacity of the stack
++ * and mess up your programs. 
++ * We circumvent this by declaring a few global buffers as  kitchen counters where we can 
++ * slice and dice our strings. These strings are mostly used to control the display or handle
++ * the input and output from the USB port. We must keep a count of the bytes used while reading
++ * the serial port as we can easily run out of buffer space. This is done in the serial_in_count variable.
++ */
++extern char c[30], b[30];      
++extern char printBuff[2][20];  //mirrors what is showing on the two lines of the display
++extern int count;          //to generally count ticks, loops, etc
++
++/** 
++ *  The second set of 16 pins on the Raduino's bottom connector are have the three clock outputs and the digital lines to control the rig.
++ *  This assignment is as follows :
++ *    Pin   1   2    3    4    5    6    7    8    9    10   11   12   13   14   15   16
++ *         GND +5V CLK0  GND  GND  CLK1 GND  GND  CLK2  GND  D2   D3   D4   D5   D6   D7  
++ *  These too are flexible with what you may do with them, for the Raduino, we use them to :
++ *  - TX_RX line : Switches between Transmit and Receive after sensing the PTT or the morse keyer
++ *  - CW_KEY line : turns on the carrier for CW
++ */
++
++
++/**
++ * These are the indices where these user changable settinngs are stored  in the EEPROM
++ */
++#define MASTER_CAL 0
++#define LSB_CAL 4
++#define USB_CAL 8
++#define SIDE_TONE 12
++//these are ids of the vfos as well as their offset into the eeprom storage, don't change these 'magic' values
++#define VFO_A 16
++#define VFO_B 20
++#define CW_SIDETONE 24
++#define CW_SPEED 28
++// the screen calibration parameters : int slope_x=104, slope_y=137, offset_x=28, offset_y=29;
++#define SLOPE_X 32
++#define SLOPE_Y 36
++#define OFFSET_X 40
++#define OFFSET_Y 44
++#define CW_DELAYTIME 48
++
++//These are defines for the new features back-ported from KD8CEC's software
++//these start from beyond 256 as Ian, KD8CEC has kept the first 256 bytes free for the base version
++#define VFO_A_MODE  256 // 2: LSB, 3: USB
++#define VFO_B_MODE  257
++
++//values that are stroed for the VFO modes
++#define VFO_MODE_LSB 2
++#define VFO_MODE_USB 3
++
++// handkey, iambic a, iambic b : 0,1,2f
++#define CW_KEY_TYPE 358
++
++/**
++ * The uBITX is an upconnversion transceiver. The first IF is at 45 MHz.
++ * The first IF frequency is not exactly at 45 Mhz but about 5 khz lower,
++ * this shift is due to the loading on the 45 Mhz crystal filter by the matching
++ * L-network used on it's either sides.
++ * The first oscillator works between 48 Mhz and 75 MHz. The signal is subtracted
++ * from the first oscillator to arriive at 45 Mhz IF. Thus, it is inverted : LSB becomes USB
++ * and USB becomes LSB.
++ * The second IF of 11.059 Mhz has a ladder crystal filter. If a second oscillator is used at 
++ * 56 Mhz (appox), the signal is subtracted FROM the oscillator, inverting a second time, and arrives 
++ * at the 11.059 Mhz ladder filter thus doouble inversion, keeps the sidebands as they originally were.
++ * If the second oscillator is at 33 Mhz, the oscilaltor is subtracated from the signal, 
++ * thus keeping the signal's sidebands inverted. The USB will become LSB.
++ * We use this technique to switch sidebands. This is to avoid placing the lsbCarrier close to
++ * 11 MHz where its fifth harmonic beats with the arduino's 16 Mhz oscillator's fourth harmonic
++ */
++
++#define INIT_USB_FREQ   (11059200l)
++// limits the tuning and working range of the ubitx between 3 MHz and 30 MHz
++#define LOWEST_FREQ   (100000l)
++#define HIGHEST_FREQ (30000000l)
++
++//we directly generate the CW by programmin the Si5351 to the cw tx frequency, hence, both are different modes
++//these are the parameter passed to startTx
++#define TX_SSB 0
++#define TX_CW 1
++
++extern char ritOn;
++extern char vfoActive;
++extern unsigned long vfoA, vfoB, sideTone, usbCarrier;
++extern char isUsbVfoA, isUsbVfoB;
++extern unsigned long frequency, ritRxFrequency, ritTxFrequency;  //frequency is the current frequency on the dial
++extern unsigned long firstIF;
++
++// if cwMode is flipped on, the rx frequency is tuned down by sidetone hz instead of being zerobeat
++extern int cwMode;
++
++
++//these are variables that control the keyer behaviour
++extern int cwSpeed; //this is actuall the dot period in milliseconds
++extern int32_t calibration;
++extern int cwDelayTime;
++extern bool Iambic_Key;
++
++#define IAMBICB 0x10 // 0 for Iambic A, 1 for Iambic B
++extern unsigned char keyerControl;
++//during CAT commands, we will freeeze the display until CAT is disengaged
++extern unsigned char doingCAT;
++
++
++/**
++ * Raduino needs to keep track of current state of the transceiver. These are a few variables that do it
++ */
++extern boolean txCAT;        //turned on if the transmitting due to a CAT command
++extern char inTx;                //it is set to 1 if in transmit mode (whatever the reason : cw, ptt or cat)
++extern int splitOn;             //working split, uses VFO B as the transmit frequency
++extern char keyDown;             //in cw mode, denotes the carrier is being transmitted
++extern char isUSB;               //upper sideband was selected, this is reset to the default for the 
++                              //frequency when it crosses the frequency border of 10 MHz
++extern byte menuOn;              //set to 1 when the menu is being displayed, if a menu item sets it to zero, the menu is exited
++extern unsigned long cwTimeout;  //milliseconds to go before the cw transmit line is released and the radio goes back to rx mode
++extern unsigned long dbgCount;   //not used now
++extern unsigned char txFilter ;   //which of the four transmit filters are in use
++extern boolean modeCalibrate;//this mode of menus shows extended menus to calibrate the oscillators and choose the proper
++                              //beat frequency
++
++/* these are functions implemented in the main file named as ubitx_xxx.ino */
++void active_delay(int delay_by);
++void saveVFOs();
++void setFrequency(unsigned long f);
++void startTx(byte txMode);
++void stopTx();
++void ritEnable(unsigned long f);
++void ritDisable();
++void checkCAT();
++void cwKeyer(void);
++void switchVFO(int vfoSelect);
++
++int enc_read(void); // returns the number of ticks in a short interval, +ve in clockwise, -ve in anti-clockwise
++int btnDown(); //returns true if the encoder button is pressed
++
++/* these functions are called universally to update the display */
++void updateDisplay(); //updates just the VFO frequency to show what is in 'frequency' variable
++void redrawVFOs();    //redraws only the changed digits of the vfo
++void guiUpdate();     //repaints the entire screen. Slow!!
++void drawCommandbar(char *text);
++void drawTx();
++//getValueByKnob() provides a reusable dialog box to get a value from the encoder, the prefix and postfix 
++//are useful to concatanate the values with text like "Set Freq to " x " KHz"
++int getValueByKnob(int minimum, int maximum, int step_size,  int initial, char* prefix, char *postfix);
++
++//functions of the setup menu. implemented in seteup.cpp
++void doSetup2(); //main setup function, displays the setup menu, calls various dialog boxes
++void setupBFO();
++void setupFreq();
++
++
++
++//displays a nice dialog box with a title and instructions as footnotes
++void displayDialog(char *title, char *instructions);
++void printCarrierFreq(unsigned long freq); //used to display the frequency in the command area (ex: fast tuning)
++
++void enc_setup(void);
++int enc_read(void);
++
++//main functions to check if any button is pressed and other user interface events
++void doCommands();  //does the commands with encoder to jump from button to button
++void  checkTouch(); //does the commands with a touch on the buttons
++
++
++/* these are functiosn implemented in ubitx_si5351.cpp */
++void si5351bx_setfreq(uint8_t clknum, uint32_t fout);
++void initOscillators();
++void si5351_set_calibration(int32_t cal); //calibration is a small value that is nudged to make up for the inaccuracies of the reference 25 MHz crystal frequency 
+diff --git a/ubitx_v6.1_code/ubitx_cat.cpp b/ubitx_v6.1_code/ubitx_cat.cpp
+new file mode 100644
+index 0000000..c15bc26
+--- /dev/null
++++ b/ubitx_v6.1_code/ubitx_cat.cpp
+@@ -0,0 +1,457 @@
++#include <Arduino.h>
++#include "ubitx.h"
++#include "nano_gui.h"
++
++/**
++ * The CAT protocol is used by many radios to provide remote control to comptuers through
++ * the serial port.
++ * 
++ * This is very much a work in progress. Parts of this code have been liberally
++ * borrowed from other GPLicensed works like hamlib.
++ * 
++ * WARNING : This is an unstable version and it has worked with fldigi, 
++ * it gives time out error with WSJTX 1.8.0  
++ */
++
++static unsigned long rxBufferArriveTime = 0;
++static byte rxBufferCheckCount = 0;
++#define CAT_RECEIVE_TIMEOUT 500
++static byte cat[5]; 
++static byte insideCat = 0; 
++static byte useOpenRadioControl = 0;
++
++//for broken protocol
++#define CAT_RECEIVE_TIMEOUT 500
++
++#define CAT_MODE_LSB            0x00
++#define CAT_MODE_USB            0x01
++#define CAT_MODE_CW             0x02
++#define CAT_MODE_CWR            0x03
++#define CAT_MODE_AM             0x04
++#define CAT_MODE_FM             0x08
++#define CAT_MODE_DIG            0x0A
++#define CAT_MODE_PKT            0x0C
++#define CAT_MODE_FMN            0x88
++
++#define ACK 0
++
++unsigned int skipTimeCount = 0;
++
++byte setHighNibble(byte b,byte v) {
++  // Clear the high nibble
++  b &= 0x0f;
++  // Set the high nibble
++  return b | ((v & 0x0f) << 4);
++}
++
++byte setLowNibble(byte b,byte v) {
++  // Clear the low nibble
++  b &= 0xf0;
++  // Set the low nibble
++  return b | (v & 0x0f);
++}
++
++byte getHighNibble(byte b) {
++  return (b >> 4) & 0x0f;
++}
++
++byte getLowNibble(byte b) {
++  return b & 0x0f;
++}
++
++// Takes a number and produces the requested number of decimal digits, staring
++// from the least significant digit.  
++//
++void getDecimalDigits(unsigned long number,byte* result,int digits) {
++  for (int i = 0; i < digits; i++) {
++    // "Mask off" (in a decimal sense) the LSD and return it
++    result[i] = number % 10;
++    // "Shift right" (in a decimal sense)
++    number /= 10;
++  }
++}
++
++// Takes a frequency and writes it into the CAT command buffer in BCD form.
++//
++void writeFreq(unsigned long freq,byte* cmd) {
++  // Convert the frequency to a set of decimal digits. We are taking 9 digits
++  // so that we can get up to 999 MHz. But the protocol doesn't care about the
++  // LSD (1's place), so we ignore that digit.
++  byte digits[9];
++  getDecimalDigits(freq,digits,9);
++  // Start from the LSB and get each nibble 
++  cmd[3] = setLowNibble(cmd[3],digits[1]);
++  cmd[3] = setHighNibble(cmd[3],digits[2]);
++  cmd[2] = setLowNibble(cmd[2],digits[3]);
++  cmd[2] = setHighNibble(cmd[2],digits[4]);
++  cmd[1] = setLowNibble(cmd[1],digits[5]);
++  cmd[1] = setHighNibble(cmd[1],digits[6]);
++  cmd[0] = setLowNibble(cmd[0],digits[7]);
++  cmd[0] = setHighNibble(cmd[0],digits[8]);  
++}
++
++// This function takes a frquency that is encoded using 4 bytes of BCD
++// representation and turns it into an long measured in Hz.
++//
++// [12][34][56][78] = 123.45678? Mhz
++//
++unsigned long readFreq(byte* cmd) {
++    // Pull off each of the digits
++    byte d7 = getHighNibble(cmd[0]);
++    byte d6 = getLowNibble(cmd[0]);
++    byte d5 = getHighNibble(cmd[1]);
++    byte d4 = getLowNibble(cmd[1]); 
++    byte d3 = getHighNibble(cmd[2]);
++    byte d2 = getLowNibble(cmd[2]); 
++    byte d1 = getHighNibble(cmd[3]);
++    byte d0 = getLowNibble(cmd[3]); 
++    return  
++      (unsigned long)d7 * 100000000L +
++      (unsigned long)d6 * 10000000L +
++      (unsigned long)d5 * 1000000L + 
++      (unsigned long)d4 * 100000L + 
++      (unsigned long)d3 * 10000L + 
++      (unsigned long)d2 * 1000L + 
++      (unsigned long)d1 * 100L + 
++      (unsigned long)d0 * 10L; 
++}
++
++//void ReadEEPRom_FT817(byte fromType)
++void catReadEEPRom(void)
++{
++  //for remove warnings
++  byte temp0 = cat[0];
++  byte temp1 = cat[1];
++/*
++  itoa((int) cat[0], b, 16);
++  strcat(b, ":");
++  itoa((int) cat[1], c, 16);
++  strcat(b, c);
++  printLine2(b);
++*/
++
++  cat[0] = 0;
++  cat[1] = 0;
++  //for remove warnings[1] = 0;
++  
++  switch (temp1)
++  {
++    case 0x45 : //
++      if (temp0 == 0x03)
++      {
++        cat[0] = 0x00;
++        cat[1] = 0xD0;
++      }
++      break;
++    case 0x47 : //
++      if (temp0 == 0x03)
++      {
++        cat[0] = 0xDC;
++        cat[1] = 0xE0;
++      }
++      break;
++    case 0x55 :
++      //0 : VFO A/B  0 = VFO-A, 1 = VFO-B
++      //1 : MTQMB Select  0 = (Not MTQMB), 1 = MTQMB ("Memory Tune Quick Memory Bank")
++      //2 : QMB Select  0 = (Not QMB), 1 = QMB  ("Quick Memory Bank")
++      //3 :
++      //4 : Home Select  0 = (Not HOME), 1 = HOME memory
++      //5 : Memory/MTUNE select  0 = Memory, 1 = MTUNE
++      //6 :
++      //7 : MEM/VFO Select  0 = Memory, 1 = VFO (A or B - see bit 0)
++      cat[0] = 0x80 + (vfoActive == VFO_B ? 1 : 0);
++      cat[1] = 0x00;
++      break;
++    case 0x57 : //
++      //0 : 1-0  AGC Mode  00 = Auto, 01 = Fast, 10 = Slow, 11 = Off
++      //2  DSP On/Off  0 = Off, 1 = On  (Display format)
++      //4  PBT On/Off  0 = Off, 1 = On  (Passband Tuning)
++      //5  NB On/Off 0 = Off, 1 = On  (Noise Blanker)
++      //6  Lock On/Off 0 = Off, 1 = On  (Dial Lock)
++      //7  FST (Fast Tuning) On/Off  0 = Off, 1 = On  (Fast tuning)
++
++      cat[0] = 0xC0;
++      cat[1] = 0x40;
++      break;
++    case 0x59 : //  band select VFO A Band Select  0000 = 160 M, 0001 = 75 M, 0010 = 40 M, 0011 = 30 M, 0100 = 20 M, 0101 = 17 M, 0110 = 15 M, 0111 = 12 M, 1000 = 10 M, 1001 = 6 M, 1010 = FM BCB, 1011 = Air, 1100 = 2 M, 1101 = UHF, 1110 = (Phantom)
++      //http://www.ka7oei.com/ft817_memmap.html
++      //CAT_BUFF[0] = 0xC2;
++      //CAT_BUFF[1] = 0x82;
++      break;
++    case 0x5C : //Beep Volume (0-100) (#13)
++      cat[0] = 0xB2;
++      cat[1] = 0x42;
++      break;
++    case 0x5E :
++      //3-0 : CW Pitch (300-1000 Hz) (#20)  From 0 to E (HEX) with 0 = 300 Hz and each step representing 50 Hz
++      //5-4 :  Lock Mode (#32) 00 = Dial, 01 = Freq, 10 = Panel
++      //7-6 :  Op Filter (#38) 00 = Off, 01 = SSB, 10 = CW
++      //CAT_BUFF[0] = 0x08;
++      cat[0] = (sideTone - 300)/50;
++      cat[1] = 0x25;
++      break;
++    case 0x61 : //Sidetone (Volume) (#44)
++      cat[0] = sideTone % 50;
++      cat[1] = 0x08;
++      break;
++    case  0x5F : //
++      //4-0  CW Weight (1.:2.5-1:4.5) (#22)  From 0 to 14 (HEX) with 0 = 1:2.5, incrementing in 0.1 weight steps
++      //5  420 ARS (#2)  0 = Off, 1 = On
++      //6  144 ARS (#1)  0 = Off, 1 = On
++      //7  Sql/RF-G (#45)  0 = Off, 1 = On
++      cat[0] = 0x32;
++      cat[1] = 0x08;
++      break;
++    case 0x60 : //CW Delay (10-2500 ms) (#17)  From 1 to 250 (decimal) with each step representing 10 ms
++      cat[0] = cwDelayTime;
++      cat[1] = 0x32;
++      break;
++    case 0x62 : //
++      //5-0  CW Speed (4-60 WPM) (#21) From 0 to 38 (HEX) with 0 = 4 WPM and 38 = 60 WPM (1 WPM steps)
++      //7-6  Batt-Chg (6/8/10 Hours (#11)  00 = 6 Hours, 01 = 8 Hours, 10 = 10 Hours
++      //CAT_BUFF[0] = 0x08;
++      cat[0] = 1200 / cwSpeed - 4;
++      cat[1] = 0xB2;
++      break;
++    case 0x63 : //
++      //6-0  VOX Gain (#51)  Contains 1-100 (decimal) as displayed
++      //7  Disable AM/FM Dial (#4) 0 = Enable, 1 = Disable
++      cat[0] = 0xB2;
++      cat[1] = 0xA5;
++      break;
++    case 0x64 : //
++      break;
++    case 0x67 : //6-0  SSB Mic (#46) Contains 0-100 (decimal) as displayed
++      cat[0] = 0xB2;
++      cat[1] = 0xB2;
++      break;      case 0x69 : //FM Mic (#29)  Contains 0-100 (decimal) as displayed
++    case 0x78 :
++      if (isUSB)
++        cat[0] = CAT_MODE_USB;
++      else
++        cat[0] = CAT_MODE_LSB;
++        
++      if (cat[0] != 0) cat[0] = 1 << 5;
++      break;
++    case  0x79 : //
++      //1-0  TX Power (All bands)  00 = High, 01 = L3, 10 = L2, 11 = L1
++      //3  PRI On/Off  0 = Off, 1 = On
++      //DW On/Off  0 = Off, 1 = On
++      //SCN (Scan) Mode  00 = No scan, 10 = Scan up, 11 = Scan down
++      //ART On/Off  0 = Off, 1 = On
++      cat[0] = 0x00;
++      cat[1] = 0x00;
++      break;
++    case 0x7A : //SPLIT
++      //7A  0 HF Antenna Select 0 = Front, 1 = Rear
++      //7A  1 6 M Antenna Select  0 = Front, 1 = Rear
++      //7A  2 FM BCB Antenna Select 0 = Front, 1 = Rear
++      //7A  3 Air Antenna Select  0 = Front, 1 = Rear
++      //7A  4 2 M Antenna Select  0 = Front, 1 = Rear
++      //7A  5 UHF Antenna Select  0 = Front, 1 = Rear
++      //7A  6 ? ?
++      //7A  7 SPL On/Off  0 = Off, 1 = On
++
++      cat[0] = (splitOn ? 0xFF : 0x7F);
++      break;
++    case 0xB3 : //
++      cat[0] = 0x00;
++      cat[1] = 0x4D;
++      break;
++
++  }
++
++  // sent the data
++  Serial.write(cat, 2);
++}
++
++void processCATCommand2(byte* cmd) {
++  byte response[5];
++  unsigned long f;
++  
++  switch(cmd[4]){
++/*  case 0x00:
++    response[0]=0;
++    Serial.write(response, 1);
++    break;
++*/    
++  case 0x01:
++    //set frequency
++    f = readFreq(cmd);
++    setFrequency(f);   
++    updateDisplay();
++    response[0]=0;
++    Serial.write(response, 1);
++    //sprintf(b, "set:%ld", f); 
++    //printLine2(b);
++    break;
++
++  case 0x02:
++    //split on 
++    splitOn =  1;
++    break;
++  case 0x82:
++    //split off
++    splitOn = 0;
++    break;
++    
++  case 0x03:
++    writeFreq(frequency,response); // Put the frequency into the buffer
++    if (isUSB)
++      response[4] = 0x01; //USB
++    else
++      response[4] = 0x00; //LSB
++    Serial.write(response,5);
++    //printLine2("cat:getfreq");
++    break;
++    
++  case 0x07: // set mode
++    if (cmd[0] == 0x00 || cmd[0] == 0x03)
++      isUSB = 0;
++    else
++      isUSB = 1;
++    response[0] = 0x00;
++    Serial.write(response, 1);
++    setFrequency(frequency);
++      //printLine2("cat: mode changed");
++    //updateDisplay();
++    break;   
++ 
++  case 0x08: // PTT On
++    if (!inTx) {
++      response[0] = 0;
++      txCAT = true;
++      startTx(TX_SSB);
++      updateDisplay();
++    } else {
++      response[0] = 0xf0;
++    } 
++    Serial.write(response,1);
++    updateDisplay();
++    break;
++
++  case 0x88 : //PTT OFF
++    if (inTx) {
++      stopTx();
++      txCAT = false;
++    }
++    response[0] = 0;
++    Serial.write(response,1);
++    updateDisplay();
++    break;
++
++  case 0x81:
++    //toggle the VFOs
++    response[0] = 0;
++    if (vfoActive == VFO_A)
++      switchVFO(VFO_B);
++    else
++      switchVFO(VFO_A);
++    //menuVfoToggle(1); // '1' forces it to change the VFO
++    Serial.write(response,1);
++    updateDisplay();
++    break;
++
++ case 0xBB:  //Read FT-817 EEPROM Data  (for comfirtable)
++    catReadEEPRom();
++    break;
++
++  case 0xe7 : 
++    // get receiver status, we have hardcoded this as
++    //as we dont' support ctcss, etc.
++    response[0] = 0x09;
++    Serial.write(response,1);
++    break;
++       
++  case 0xf7:
++    {
++      boolean isHighSWR = false;
++      boolean isSplitOn = false;
++  
++      /*
++        Inverted -> *ptt = ((p->tx_status & 0x80) == 0); <-- souce code in ft817.c (hamlib)
++      */
++      response[0] = ((inTx ? 0 : 1) << 7) +
++        ((isHighSWR ? 1 : 0) << 6) +  //hi swr off / on
++        ((isSplitOn ? 1 : 0) << 5) + //Split on / off
++        (0 << 4) +  //dummy data
++        0x08;  //P0 meter data
++
++      Serial.write(response, 1);
++    }
++    break;
++    
++  default:
++    //somehow, get this to print the four bytes
++    ultoa(*((unsigned long *)cmd), c, 16);
++    /*itoa(cmd[4], b, 16);
++    strcat(b, ">");
++    strcat(b, c);
++    printLine2(b);*/
++    response[0] = 0x00;
++    Serial.write(response[0]);
++  }
++
++  insideCat = false;
++}
++
++int catCount = 0;
++void checkCAT(){
++  byte i;
++
++  //Check Serial Port Buffer
++  if (Serial.available() == 0) {      //Set Buffer Clear status
++    rxBufferCheckCount = 0;
++    return;
++  }
++  else if (Serial.available() < 5) {                         //First Arrived
++    if (rxBufferCheckCount == 0){
++      rxBufferCheckCount = Serial.available();
++      rxBufferArriveTime = millis() + CAT_RECEIVE_TIMEOUT;  //Set time for timeout
++    }
++    else if (rxBufferArriveTime < millis()){                //Clear Buffer
++      for (i = 0; i < Serial.available(); i++)
++        rxBufferCheckCount = Serial.read();
++      rxBufferCheckCount = 0;
++    }
++    else if (rxBufferCheckCount < Serial.available()){      // Increase buffer count, slow arrive
++      rxBufferCheckCount = Serial.available();
++      rxBufferArriveTime = millis() + CAT_RECEIVE_TIMEOUT;  //Set time for timeout
++    }
++    return;
++  }
++
++    
++  //Arived CAT DATA
++  for (i = 0; i < 5; i++)
++    cat[i] = Serial.read();
++
++
++  //this code is not re-entrant.
++  if (insideCat == 1)
++    return;
++  insideCat = 1;
++
++/**
++ *  This routine is enabled to debug the cat protocol
++**/
++  catCount++;
++
++/*
++  if (cat[4] != 0xf7 && cat[4] != 0xbb && cat[4] != 0x03){
++    sprintf(b, "%d %02x %02x%02x%02x%02x", catCount, cat[4],cat[0], cat[1], cat[2], cat[3]);  
++    printLine2(b);  
++  }
++*/  
++
++/*
++  if (!doingCAT){
++    doingCAT = 1;
++    displayText("CAT on", 100,120,100,40, ILI9341_ORANGE, ILI9341_BLACK, ILI9341_WHITE);
++  }
++*/
++  processCATCommand2(cat);
++  insideCat = 0;
++}
++
++
+diff --git a/ubitx_v6.1_code/ubitx_si5351.cpp b/ubitx_v6.1_code/ubitx_si5351.cpp
+new file mode 100644
+index 0000000..544648a
+--- /dev/null
++++ b/ubitx_v6.1_code/ubitx_si5351.cpp
+@@ -0,0 +1,129 @@
++#include <Arduino.h>
++#include <Wire.h>
++#include "ubitx.h"
++
++// *************  SI5315 routines - tks Jerry Gaffke, KE7ER   ***********************
++
++// An minimalist standalone set of Si5351 routines.
++// VCOA is fixed at 875mhz, VCOB not used.
++// The output msynth dividers are used to generate 3 independent clocks
++// with 1hz resolution to any frequency between 4khz and 109mhz.
++
++// Usage:
++// Call si5351bx_init() once at startup with no args;
++// Call si5351bx_setfreq(clknum, freq) each time one of the
++// three output CLK pins is to be updated to a new frequency.
++// A freq of 0 serves to shut down that output clock.
++
++// The global variable si5351bx_vcoa starts out equal to the nominal VCOA
++// frequency of 25mhz*35 = 875000000 Hz.  To correct for 25mhz crystal errors,
++// the user can adjust this value.  The vco frequency will not change but
++// the number used for the (a+b/c) output msynth calculations is affected.
++// Example:  We call for a 5mhz signal, but it measures to be 5.001mhz.
++// So the actual vcoa frequency is 875mhz*5.001/5.000 = 875175000 Hz,
++// To correct for this error:     si5351bx_vcoa=875175000;
++
++// Most users will never need to generate clocks below 500khz.
++// But it is possible to do so by loading a value between 0 and 7 into
++// the global variable si5351bx_rdiv, be sure to return it to a value of 0
++// before setting some other CLK output pin.  The affected clock will be
++// divided down by a power of two defined by  2**si5351_rdiv
++// A value of zero gives a divide factor of 1, a value of 7 divides by 128.
++// This lightweight method is a reasonable compromise for a seldom used feature.
++
++
++#define BB0(x) ((uint8_t)x)             // Bust int32 into Bytes
++#define BB1(x) ((uint8_t)(x>>8))
++#define BB2(x) ((uint8_t)(x>>16))
++
++#define SI5351BX_ADDR 0x60              // I2C address of Si5351   (typical)
++#define SI5351BX_XTALPF 2               // 1:6pf  2:8pf  3:10pf
++
++// If using 27mhz crystal, set XTAL=27000000, MSA=33.  Then vco=891mhz
++#define SI5351BX_XTAL 25000000          // Crystal freq in Hz
++#define SI5351BX_MSA  35                // VCOA is at 25mhz*35 = 875mhz
++
++// User program may have reason to poke new values into these 3 RAM variables
++uint32_t si5351bx_vcoa = (SI5351BX_XTAL*SI5351BX_MSA);  // 25mhzXtal calibrate
++uint8_t  si5351bx_rdiv = 0;             // 0-7, CLK pin sees fout/(2**rdiv)
++uint8_t  si5351bx_drive[3] = {3, 3, 3}; // 0=2ma 1=4ma 2=6ma 3=8ma for CLK 0,1,2
++uint8_t  si5351bx_clken = 0xFF;         // Private, all CLK output drivers off
++int32_t calibration = 0;
++
++void i2cWrite(uint8_t reg, uint8_t val) {   // write reg via i2c
++  Wire.beginTransmission(SI5351BX_ADDR);
++  Wire.write(reg);
++  Wire.write(val);
++  Wire.endTransmission();
++}
++
++void i2cWriten(uint8_t reg, uint8_t *vals, uint8_t vcnt) {  // write array
++  Wire.beginTransmission(SI5351BX_ADDR);
++  Wire.write(reg);
++  while (vcnt--) Wire.write(*vals++);
++  Wire.endTransmission();
++}
++
++
++void si5351bx_init() {                  // Call once at power-up, start PLLA
++  uint8_t reg;  uint32_t msxp1;
++  Wire.begin();
++  i2cWrite(149, 0);                     // SpreadSpectrum off
++  i2cWrite(3, si5351bx_clken);          // Disable all CLK output drivers
++  i2cWrite(183, SI5351BX_XTALPF << 6);  // Set 25mhz crystal load capacitance
++  msxp1 = 128 * SI5351BX_MSA - 512;     // and msxp2=0, msxp3=1, not fractional
++  uint8_t  vals[8] = {0, 1, BB2(msxp1), BB1(msxp1), BB0(msxp1), 0, 0, 0};
++  i2cWriten(26, vals, 8);               // Write to 8 PLLA msynth regs
++  i2cWrite(177, 0x20);                  // Reset PLLA  (0x80 resets PLLB)
++  // for (reg=16; reg<=23; reg++) i2cWrite(reg, 0x80);    // Powerdown CLK's
++  // i2cWrite(187, 0);                  // No fannout of clkin, xtal, ms0, ms4
++
++  //initializing the ppl2 as well
++  i2cWriten(34, vals, 8);               // Write to 8 PLLA msynth regs
++  i2cWrite(177, 0xa0);                  // Reset PLLA  & PPLB (0x80 resets PLLB)
++
++}
++
++void si5351bx_setfreq(uint8_t clknum, uint32_t fout) {  // Set a CLK to fout Hz
++  uint32_t  msa, msb, msc, msxp1, msxp2, msxp3p2top;
++  if ((fout < 500000) || (fout > 109000000)) // If clock freq out of range
++    si5351bx_clken |= 1 << clknum;      //  shut down the clock
++  else {
++    msa = si5351bx_vcoa / fout;     // Integer part of vco/fout
++    msb = si5351bx_vcoa % fout;     // Fractional part of vco/fout
++    msc = fout;             // Divide by 2 till fits in reg
++    while (msc & 0xfff00000) {
++      msb = msb >> 1;
++      msc = msc >> 1;
++    }
++    msxp1 = (128 * msa + 128 * msb / msc - 512) | (((uint32_t)si5351bx_rdiv) << 20);
++    msxp2 = 128 * msb - 128 * msb / msc * msc; // msxp3 == msc;
++    msxp3p2top = (((msc & 0x0F0000) << 4) | msxp2);     // 2 top nibbles
++    uint8_t vals[8] = { BB1(msc), BB0(msc), BB2(msxp1), BB1(msxp1),
++                        BB0(msxp1), BB2(msxp3p2top), BB1(msxp2), BB0(msxp2)
++                      };
++    i2cWriten(42 + (clknum * 8), vals, 8); // Write to 8 msynth regs
++//    if (clknum == 1)      //PLLB | MS src | drive current
++//      i2cWrite(16 + clknum, 0x20 | 0x0C | si5351bx_drive[clknum]); // use local msynth   
++//    else
++      i2cWrite(16 + clknum, 0x0C | si5351bx_drive[clknum]); // use local msynth
++   
++    si5351bx_clken &= ~(1 << clknum);   // Clear bit to enable clock
++  }
++  i2cWrite(3, si5351bx_clken);        // Enable/disable clock
++}
++
++void si5351_set_calibration(int32_t cal){
++    si5351bx_vcoa = (SI5351BX_XTAL * SI5351BX_MSA) + cal; // apply the calibration correction factor
++    si5351bx_setfreq(0, usbCarrier);
++}
++
++void initOscillators(){
++  //initialize the SI5351
++  si5351bx_init();
++  si5351bx_vcoa = (SI5351BX_XTAL * SI5351BX_MSA) + calibration; // apply the calibration correction factor
++  si5351bx_setfreq(0, usbCarrier);
++}
++
++
++
+diff --git a/ubitx_v6.1_code/ubitx_ui.cpp b/ubitx_v6.1_code/ubitx_ui.cpp
+new file mode 100644
+index 0000000..fbf456f
+--- /dev/null
++++ b/ubitx_v6.1_code/ubitx_ui.cpp
+@@ -0,0 +1,870 @@
++#include <Arduino.h>
++#include <EEPROM.h>
++#include "morse.h"
++#include "ubitx.h"
++#include "nano_gui.h"
++
++/**
++ * The user interface of the ubitx consists of the encoder, the push-button on top of it
++ * and the 16x2 LCD display.
++ * The upper line of the display is constantly used to display frequency and status
++ * of the radio. Occasionally, it is used to provide a two-line information that is 
++ * quickly cleared up.
++ */
++
++#define BUTTON_SELECTED 1
++
++struct Button {
++  int x, y, w, h;
++  char *text;
++  char *morse;
++};
++
++#define MAX_BUTTONS 17
++const struct Button btn_set[MAX_BUTTONS] PROGMEM = { 
++//const struct Button  btn_set [] = {
++  {0, 10, 159, 36,  "VFOA", "A"},
++  {160, 10, 159, 36, "VFOB", "B"},
++  
++  {0, 80, 60, 36,  "RIT", "R"},
++  {64, 80, 60, 36, "USB", "U"},
++  {128, 80, 60, 36, "LSB", "L"},
++  {192, 80, 60, 36, "CW", "M"},
++  {256, 80, 60, 36, "SPL", "S"},
++
++  {0, 120, 60, 36, "80", "8"},
++  {64, 120, 60, 36, "40", "4"},
++  {128, 120, 60, 36, "30", "3"},
++  {192, 120, 60, 36, "20", "2"},
++  {256, 120, 60, 36, "17", "7"},
++
++  {0, 160, 60, 36, "15", "5"},
++  {64, 160, 60, 36, "10", "1"},
++  {128, 160, 60, 36, "WPM", "W"},
++  {192, 160, 60, 36, "TON", "T"},
++  {256, 160, 60, 36, "FRQ", "F"},
++};
++
++#define MAX_KEYS 17
++const struct Button keypad[MAX_KEYS] PROGMEM = {   
++  {0, 80, 60, 36,  "1", "1"},
++  {64, 80, 60, 36, "2", "2"},
++  {128, 80, 60, 36, "3", "3"},
++  {192, 80, 60, 36,  "", ""},
++  {256, 80, 60, 36,  "OK", "K"},
++
++  {0, 120, 60, 36,  "4", "4"},
++  {64, 120, 60, 36,  "5", "5"},
++  {128, 120, 60, 36,  "6", "6"},
++  {192, 120, 60, 36,  "0", "0"},
++  {256, 120, 60, 36,  "<-", "B"},
++
++  {0, 160, 60, 36,  "7", "7"},
++  {64, 160, 60, 36, "8", "8"},
++  {128, 160, 60, 36, "9", "9"},
++  {192, 160, 60, 36,  "", ""},
++  {256, 160, 60, 36,  "Can", "C"},
++};
++
++boolean getButton(char *text, struct Button *b){
++  for (int i = 0; i < MAX_BUTTONS; i++){
++    memcpy_P(b, btn_set + i, sizeof(struct Button));
++    if (!strcmp(text, b->text)){
++      return true;
++    }
++  }
++  return false;
++}
++
++
++/*
++ * This formats the frequency given in f 
++ */
++void formatFreq(long f, char *buff) {
++  // tks Jack Purdum W8TEE
++  // replaced fsprint commmands by str commands for code size reduction
++
++  memset(buff, 0, 10);
++  memset(b, 0, sizeof(b));
++
++  ultoa(f, b, DEC);
++
++  //one mhz digit if less than 10 M, two digits if more
++  if (f < 10000000l){
++    buff[0] = ' ';
++    strncat(buff, b, 4);    
++    strcat(buff, ".");
++    strncat(buff, &b[4], 2);
++  }
++  else {
++    strncat(buff, b, 5);
++    strcat(buff, ".");
++    strncat(buff, &b[5], 2);    
++  }
++}
++
++void drawCommandbar(char *text){
++  displayFillrect(30,45,280, 32, DISPLAY_NAVY);
++  displayRawText(text, 30, 45, DISPLAY_WHITE, DISPLAY_NAVY);
++}
++
++/** A generic control to read variable values
++*/
++int getValueByKnob(int minimum, int maximum, int step_size,  int initial, char* prefix, char *postfix)
++{
++    int knob = 0;
++    int knob_value;
++
++    while (btnDown())
++      active_delay(100);
++
++    active_delay(200);
++    knob_value = initial;
++     
++    strcpy(b, prefix);
++    itoa(knob_value, c, 10);
++    strcat(b, c);
++    strcat(b, postfix);
++    drawCommandbar(b);
++
++    while(!btnDown() && digitalRead(PTT) == HIGH){
++
++      knob = enc_read();
++      if (knob != 0){
++        if (knob_value > minimum && knob < 0)
++          knob_value -= step_size;
++        if (knob_value < maximum && knob > 0)
++          knob_value += step_size;
++          
++        strcpy(b, prefix);
++        itoa(knob_value, c, 10);
++        strcat(b, c);
++        strcat(b, postfix);
++        drawCommandbar(b);
++      }
++      checkCAT();
++    }
++   displayFillrect(30,41,280, 32, DISPLAY_NAVY);
++   return knob_value;
++}
++
++void printCarrierFreq(unsigned long freq){
++
++  memset(c, 0, sizeof(c));
++  memset(b, 0, sizeof(b));
++
++  ultoa(freq, b, DEC);
++  
++  strncat(c, b, 2);
++  strcat(c, ".");
++  strncat(c, &b[2], 3);
++  strcat(c, ".");
++  strncat(c, &b[5], 1);
++  displayText(c, 110, 100, 100, 30, DISPLAY_CYAN, DISPLAY_NAVY, DISPLAY_NAVY);
++}
++
++void displayDialog(char *title, char *instructions){
++  displayClear(DISPLAY_BLACK);
++  displayRect(10,10,300,220, DISPLAY_WHITE);
++  displayHline(20,45,280,DISPLAY_WHITE);
++  displayRect(12,12,296,216, DISPLAY_WHITE);
++  displayRawText(title, 20, 20, DISPLAY_CYAN, DISPLAY_NAVY);
++  displayRawText(instructions, 20, 200, DISPLAY_CYAN, DISPLAY_NAVY);
++}
++
++
++
++
++char vfoDisplay[12];
++void displayVFO(int vfo){
++  int x, y;
++  int displayColor, displayBorder;
++  Button b;
++
++  if (vfo == VFO_A){
++    getButton("VFOA", &b);
++    if (splitOn){
++      if (vfoActive == VFO_A)
++        strcpy(c, "R:");
++      else 
++        strcpy(c, "T:");
++    }
++    else  
++      strcpy(c, "A:");
++    if (vfoActive == VFO_A){
++      formatFreq(frequency, c+2);
++      displayColor = DISPLAY_WHITE;
++      displayBorder = DISPLAY_BLACK;
++    }else{
++      formatFreq(vfoA, c+2);
++      displayColor = DISPLAY_GREEN;
++      displayBorder = DISPLAY_BLACK;      
++    }
++  }
++
++  if (vfo == VFO_B){
++    getButton("VFOB", &b);
++
++    if (splitOn){
++      if (vfoActive == VFO_B)
++        strcpy(c, "R:");
++      else 
++        strcpy(c, "T:");
++    }
++    else  
++      strcpy(c, "B:");
++    if (vfoActive == VFO_B){
++      formatFreq(frequency, c+2);
++      displayColor = DISPLAY_WHITE;
++      displayBorder = DISPLAY_WHITE;
++    } else {
++      displayColor = DISPLAY_GREEN;
++      displayBorder = DISPLAY_BLACK;
++      formatFreq(vfoB, c+2);
++    }
++  }
++
++  if (vfoDisplay[0] == 0){
++    displayFillrect(b.x, b.y, b.w, b.h, DISPLAY_BLACK);
++    if (vfoActive == vfo)
++      displayRect(b.x, b.y, b.w , b.h, DISPLAY_WHITE);
++    else
++      displayRect(b.x, b.y, b.w , b.h, DISPLAY_NAVY);
++  }  
++  x = b.x + 6;
++  y = b.y + 3;
++
++  char *text = c;
++
++  for (int i = 0; i <= strlen(c); i++){
++    char digit = c[i];
++    if (digit != vfoDisplay[i]){
++      
++      displayFillrect(x, y, 15, b.h-6, DISPLAY_BLACK);
++      //checkCAT();
++     
++      displayChar(x, y + TEXT_LINE_HEIGHT + 3, digit, displayColor, DISPLAY_BLACK);
++      checkCAT();
++    }
++    if (digit == ':' || digit == '.')
++      x += 7;
++    else
++      x += 16;
++    text++;
++  }//end of the while loop of the characters to be printed  
++  
++  strcpy(vfoDisplay, c);
++}
++
++void btnDraw(struct Button *b){
++  if (!strcmp(b->text, "VFOA")){
++    memset(vfoDisplay, 0, sizeof(vfoDisplay));
++    displayVFO(VFO_A);
++  }
++  else if(!strcmp(b->text, "VFOB")){
++    memset(vfoDisplay, 0, sizeof(vfoDisplay));    
++    displayVFO(VFO_B);
++  }
++  else if ((!strcmp(b->text, "RIT") && ritOn == 1) || 
++      (!strcmp(b->text, "USB") && isUSB == 1) || 
++      (!strcmp(b->text, "LSB") && isUSB == 0) || 
++      (!strcmp(b->text, "SPL") && splitOn == 1))
++    displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_DARKGREY);   
++  else if (!strcmp(b->text, "CW") && cwMode == 1)
++      displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_DARKGREY);   
++  else
++    displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_GREEN, DISPLAY_BLACK, DISPLAY_DARKGREY);
++}
++
++
++void displayRIT(){
++  displayFillrect(0,41,320,30, DISPLAY_NAVY);
++  if (ritOn){
++    strcpy(c, "TX:");
++    formatFreq(ritTxFrequency, c+3);
++    if (vfoActive == VFO_A)
++      displayText(c, 0, 45,159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
++    else
++      displayText(c, 160, 45,159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);      
++  }
++  else {
++    if (vfoActive == VFO_A)
++      displayText("", 0, 45,159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
++    else
++      displayText("", 160, 45,159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
++  }
++}
++
++void fastTune(){
++  int encoder;
++
++  //if the btn is down, wait until it is up
++  while(btnDown())
++    active_delay(50);
++  active_delay(300);
++  
++  displayRawText("Fast tune", 100, 55, DISPLAY_CYAN, DISPLAY_NAVY);
++  while(1){
++    checkCAT();
++
++    //exit after debouncing the btnDown
++    if (btnDown()){
++      displayFillrect(100, 55, 120, 30, DISPLAY_NAVY);
++
++      //wait until the button is realsed and then return
++      while(btnDown())
++        active_delay(50);
++      active_delay(300);
++      return;
++    }
++    
++    encoder = enc_read();
++    if (encoder != 0){
++ 
++      if (encoder > 0 && frequency < 30000000l)
++        frequency += 50000l;
++      else if (encoder < 0 && frequency > 600000l)
++        frequency -= 50000l;
++      setFrequency(frequency);
++      displayVFO(vfoActive);
++    }
++  }// end of the event loop
++}
++
++void enterFreq(){
++  //force the display to refresh everything
++  //display all the buttons
++  int f;
++  
++  for (int i = 0; i < MAX_KEYS; i++){
++    struct Button b;
++    memcpy_P(&b, keypad + i, sizeof(struct Button));
++    btnDraw(&b);
++  }
++
++  int cursor_pos = 0;
++  memset(c, 0, sizeof(c));
++  f = frequency / 1000l;
++
++  while(1){
++
++    checkCAT();
++    if(!readTouch())
++      continue;
++      
++    scaleTouch(&ts_point);
++
++    int total = sizeof(btn_set)/sizeof(struct Button);
++    for (int i = 0; i < MAX_KEYS; i++){
++      struct Button b;
++      memcpy_P(&b, keypad + i, sizeof(struct Button));
++
++      int x2 = b.x + b.w;
++      int y2 = b.y + b.h;
++  
++      if (b.x < ts_point.x && ts_point.x < x2 && 
++        b.y < ts_point.y && ts_point.y < y2){
++          if (!strcmp(b.text, "OK")){
++            long f = atol(c);
++            if(30000 >= f && f > 100){
++              frequency = f * 1000l;
++              setFrequency(frequency);
++              if (vfoActive == VFO_A)
++                vfoA = frequency;
++              else
++                vfoB = frequency;
++              saveVFOs();
++            }
++            guiUpdate();
++            return;
++          }
++          else if (!strcmp(b.text, "<-")){
++            c[cursor_pos] = 0;
++            if (cursor_pos > 0)
++              cursor_pos--;      
++            c[cursor_pos] = 0;
++          }
++          else if (!strcmp(b.text, "Can")){
++            guiUpdate();
++            return;
++          }
++          else if('0' <= b.text[0] && b.text[0] <= '9'){
++            c[cursor_pos++] = b.text[0];
++            c[cursor_pos] = 0;
++          }
++        }
++    } // end of the button scanning loop
++    strcpy(b, c);
++    strcat(b, " KHz");
++    displayText(b, 0, 42, 320, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
++    delay(300);
++    while(readTouch())
++      checkCAT();
++  } // end of event loop : while(1)
++  
++}
++
++void drawCWStatus(){
++  displayFillrect(0, 201, 320, 39, DISPLAY_NAVY);
++  strcpy(b, " cw:");
++  int wpm = 1200/cwSpeed;    
++  itoa(wpm,c, 10);
++  strcat(b, c);
++  strcat(b, "wpm, ");
++  itoa(sideTone, c, 10);
++  strcat(b, c);
++  strcat(b, "hz");
++  displayRawText(b, 0, 210, DISPLAY_CYAN, DISPLAY_NAVY);  
++}
++
++
++void drawTx(){
++  if (inTx)
++    displayText("TX", 280, 48, 37, 28, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_BLUE);  
++  else
++    displayFillrect(280, 48, 37, 28, DISPLAY_NAVY);
++}
++void drawStatusbar(){
++  drawCWStatus();
++}
++
++void guiUpdate(){
++
++/*
++  if (doingCAT)
++    return;
++*/
++  // use the current frequency as the VFO frequency for the active VFO
++  displayClear(DISPLAY_NAVY);
++
++  memset(vfoDisplay, 0, 12);
++  displayVFO(VFO_A);
++  checkCAT();
++  memset(vfoDisplay, 0, 12);  
++  displayVFO(VFO_B);  
++
++  checkCAT();
++  displayRIT();
++  checkCAT();
++
++  //force the display to refresh everything
++  //display all the buttons
++  for (int i = 0; i < MAX_BUTTONS; i++){
++    struct Button b;
++    memcpy_P(&b, btn_set + i, sizeof(struct Button));
++    btnDraw(&b);
++    checkCAT();
++  }
++  drawStatusbar();
++  checkCAT();  
++}
++
++
++
++// this builds up the top line of the display with frequency and mode
++void updateDisplay() {
++   displayVFO(vfoActive);    
++}
++
++int enc_prev_state = 3;
++
++/**
++ * The A7 And A6 are purely analog lines on the Arduino Nano
++ * These need to be pulled up externally using two 10 K resistors
++ * 
++ * There are excellent pages on the Internet about how these encoders work
++ * and how they should be used. We have elected to use the simplest way
++ * to use these encoders without the complexity of interrupts etc to 
++ * keep it understandable.
++ * 
++ * The enc_state returns a two-bit number such that each bit reflects the current
++ * value of each of the two phases of the encoder
++ * 
++ * The enc_read returns the number of net pulses counted over 50 msecs. 
++ * If the puluses are -ve, they were anti-clockwise, if they are +ve, the
++ * were in the clockwise directions. Higher the pulses, greater the speed
++ * at which the enccoder was spun
++ */
++/*
++byte enc_state (void) {
++    //Serial.print(digitalRead(ENC_A)); Serial.print(":");Serial.println(digitalRead(ENC_B));
++    return (digitalRead(ENC_A) == 1 ? 1 : 0) + (digitalRead(ENC_B) == 1 ? 2: 0);
++}
++
++int enc_read(void) {
++  int result = 0; 
++  byte newState;
++  int enc_speed = 0;
++  
++  long stop_by = millis() + 200;
++  
++  while (millis() < stop_by) { // check if the previous state was stable
++    newState = enc_state(); // Get current state  
++    
++//    if (newState != enc_prev_state)
++//      active_delay(20);
++    
++    if (enc_state() != newState || newState == enc_prev_state)
++      continue; 
++    //these transitions point to the encoder being rotated anti-clockwise
++    if ((enc_prev_state == 0 && newState == 2) || 
++      (enc_prev_state == 2 && newState == 3) || 
++      (enc_prev_state == 3 && newState == 1) || 
++      (enc_prev_state == 1 && newState == 0)){
++        result--;
++      }
++    //these transitions point o the enccoder being rotated clockwise
++    if ((enc_prev_state == 0 && newState == 1) || 
++      (enc_prev_state == 1 && newState == 3) || 
++      (enc_prev_state == 3 && newState == 2) || 
++      (enc_prev_state == 2 && newState == 0)){
++        result++;
++      }
++    enc_prev_state = newState; // Record state for next pulse interpretation
++    enc_speed++;
++    active_delay(1);
++  }
++  //if (result)
++  //  Serial.println(result);
++  return(result);
++}
++*/
++
++void ritToggle(struct Button *b){
++  if (ritOn == 0){
++    ritEnable(frequency);
++  }
++  else
++    ritDisable();
++  btnDraw(b);
++  displayRIT();
++}
++
++void splitToggle(struct Button *b){
++
++  if (splitOn)
++    splitOn = 0;
++  else
++    splitOn = 1;
++
++  btnDraw(b);
++
++  //disable rit as well
++  ritDisable();
++  
++  struct Button b2;
++  getButton("RIT", &b2);
++  btnDraw(&b2);
++  
++  displayRIT();
++  memset(vfoDisplay, 0, sizeof(vfoDisplay));
++  displayVFO(VFO_A);
++  memset(vfoDisplay, 0, sizeof(vfoDisplay));
++  displayVFO(VFO_B);  
++}
++
++void vfoReset(){
++  Button b;
++  if (vfoActive = VFO_A)
++    vfoB = vfoA;
++  else
++    vfoA = vfoB;
++
++  if (splitOn){
++    getButton("SPL", &b);
++    splitToggle(&b);
++  }
++
++  if (ritOn){
++    getButton("RIT", &b);
++    ritToggle(&b);
++  }
++  
++  memset(vfoDisplay, 0, sizeof(vfoDisplay));
++  displayVFO(VFO_A);
++  memset(vfoDisplay, 0, sizeof(vfoDisplay));
++  displayVFO(VFO_B);  
++
++  saveVFOs();
++}
++
++void cwToggle(struct Button *b){
++  if (cwMode == 0){
++    cwMode = 1;
++  }
++  else
++    cwMode = 0;
++
++  setFrequency(frequency);
++  btnDraw(b);
++}
++
++void sidebandToggle(struct Button *b){
++  if (!strcmp(b->text, "LSB"))
++    isUSB = 0;
++  else
++    isUSB = 1;
++
++  struct Button e;
++  getButton("USB", &e);
++  btnDraw(&e);
++  getButton("LSB", &e);
++  btnDraw(&e);
++
++  saveVFOs();
++}
++
++
++void redrawVFOs(){
++
++    struct Button b;
++    ritDisable();
++    getButton("RIT", &b);
++    btnDraw(&b);
++    displayRIT();
++    memset(vfoDisplay, 0, sizeof(vfoDisplay));
++    displayVFO(VFO_A);
++    memset(vfoDisplay, 0, sizeof(vfoDisplay));
++    displayVFO(VFO_B);
++
++    //draw the lsb/usb buttons, the sidebands might have changed
++    getButton("LSB", &b);
++    btnDraw(&b);
++    getButton("USB", &b);
++    btnDraw(&b);  
++}
++
++
++void switchBand(long bandfreq){
++  long offset;
++
++//  Serial.println(frequency);
++//  Serial.println(bandfreq);
++  if (3500000l <= frequency && frequency <= 4000000l)
++    offset = frequency - 3500000l;
++  else if (24800000l <= frequency && frequency <= 25000000l)
++    offset = frequency - 24800000l;
++  else 
++    offset = frequency % 1000000l; 
++
++//  Serial.println(offset);
++
++  setFrequency(bandfreq + offset);
++  updateDisplay(); 
++  saveVFOs();
++}
++
++int setCwSpeed(){
++    int knob = 0;
++    int wpm;
++
++    wpm = 1200/cwSpeed;
++     
++    wpm = getValueByKnob(1, 100, 1,  wpm, "CW: ", " WPM");
++  
++    cwSpeed = 1200/wpm;
++
++    EEPROM.put(CW_SPEED, cwSpeed);
++    active_delay(500);
++    drawStatusbar();      
++//    printLine2("");
++//    updateDisplay();
++}
++
++void setCwTone(){
++  int knob = 0;
++  int prev_sideTone;
++     
++  tone(CW_TONE, sideTone);
++
++  //disable all clock 1 and clock 2 
++  while (digitalRead(PTT) == HIGH && !btnDown())
++  {
++    knob = enc_read();
++
++    if (knob > 0 && sideTone < 2000)
++      sideTone += 10;
++    else if (knob < 0 && sideTone > 100 )
++      sideTone -= 10;
++    else
++      continue; //don't update the frequency or the display
++        
++    tone(CW_TONE, sideTone);
++    itoa(sideTone, c, 10);
++    strcpy(b, "CW Tone: ");
++    strcat(b, c);
++    strcat(b, " Hz");
++    drawCommandbar(b);
++    //printLine2(b);
++
++    checkCAT();
++    active_delay(20);
++  }
++  noTone(CW_TONE);
++  //save the setting
++  EEPROM.put(CW_SIDETONE, sideTone);
++
++  displayFillrect(30,41,280, 32, DISPLAY_NAVY);
++  drawStatusbar();
++//  printLine2("");  
++//  updateDisplay();  
++}
++
++void doCommand(struct Button *b){
++  
++  if (!strcmp(b->text, "RIT"))
++    ritToggle(b);
++  else if (!strcmp(b->text, "LSB"))
++    sidebandToggle(b);
++  else if (!strcmp(b->text, "USB"))
++    sidebandToggle(b);
++  else if (!strcmp(b->text, "CW"))
++    cwToggle(b);
++  else if (!strcmp(b->text, "SPL"))
++    splitToggle(b);
++  else if (!strcmp(b->text, "VFOA")){
++    if (vfoActive == VFO_A)
++      fastTune();
++    else
++      switchVFO(VFO_A);
++  }
++  else if (!strcmp(b->text, "VFOB")){
++    if (vfoActive == VFO_B)
++      fastTune();
++    else
++      switchVFO(VFO_B);
++  }
++  else if (!strcmp(b->text, "A=B"))
++    vfoReset();
++  else if (!strcmp(b->text, "80"))
++    switchBand(3500000l);
++  else if (!strcmp(b->text, "40"))
++    switchBand(7000000l);
++  else if (!strcmp(b->text, "30"))
++    switchBand(10000000l);
++  else if (!strcmp(b->text, "20"))
++    switchBand(14000000l);
++  else if (!strcmp(b->text, "17"))
++    switchBand(18000000l);
++  else if (!strcmp(b->text, "15"))
++    switchBand(21000000l);
++  else if (!strcmp(b->text, "13"))
++    switchBand(24800000l);
++  else if (!strcmp(b->text, "10"))
++    switchBand(28000000l);  
++  else if (!strcmp(b->text, "FRQ"))
++    enterFreq();
++  else if (!strcmp(b->text, "WPM"))
++    setCwSpeed();
++  else if (!strcmp(b->text, "TON"))
++    setCwTone();
++}
++
++void  checkTouch(){
++
++  if (!readTouch())
++    return;
++
++  while(readTouch())
++    checkCAT();
++  scaleTouch(&ts_point);
++ 
++  /* //debug code
++  Serial.print(ts_point.x); Serial.print(' ');Serial.println(ts_point.y);
++  */
++  int total = sizeof(btn_set)/sizeof(struct Button);
++  for (int i = 0; i < MAX_BUTTONS; i++){
++    struct Button b;
++    memcpy_P(&b, btn_set + i, sizeof(struct Button));
++
++    int x2 = b.x + b.w;
++    int y2 = b.y + b.h;
++
++    if (b.x < ts_point.x && ts_point.x < x2 && 
++      b.y < ts_point.y && ts_point.y < y2)
++          doCommand(&b);
++  }
++}
++
++//returns true if the button is pressed
++int btnDown(){
++  if (digitalRead(FBUTTON) == HIGH)
++    return 0;
++  else
++    return 1;
++}
++
++
++void drawFocus(int ibtn, int color){
++  struct Button b;
++
++  memcpy_P(&b, btn_set + ibtn, sizeof(struct Button));
++  displayRect(b.x, b.y, b.w, b.h, color);
++}
++
++void doCommands(){
++  int select=0, i, prevButton, btnState;
++
++  //wait for the button to be raised up
++  while(btnDown())
++    active_delay(50);
++  active_delay(50);  //debounce
++
++  menuOn = 2;
++
++  while (menuOn){
++
++    //check if the knob's button was pressed
++    btnState = btnDown();
++    if (btnState){
++      struct Button b;
++      memcpy_P(&b, btn_set + select/10, sizeof(struct Button));
++    
++      doCommand(&b);
++
++      //unfocus the buttons
++      drawFocus(select, DISPLAY_BLUE);
++      if (vfoActive == VFO_A)
++        drawFocus(0, DISPLAY_WHITE);
++      else
++        drawFocus(1, DISPLAY_WHITE);
++        
++      //wait for the button to be up and debounce
++      while(btnDown())
++        active_delay(100);
++      active_delay(500);      
++      return;
++    }
++
++    i = enc_read();
++    
++    if (i == 0){
++      active_delay(50);
++      continue;
++    }
++    
++    if (i > 0){
++      if (select + i < MAX_BUTTONS * 10)
++        select += i;
++    }
++    if (i < 0 && select + i >= 0)
++      select += i;      //caught ya, i is already -ve here, so you add it
++    
++    if (prevButton == select / 10)
++      continue;
++      
++     //we are on a new button
++     drawFocus(prevButton, DISPLAY_BLUE);
++     drawFocus(select/10, DISPLAY_WHITE);
++     prevButton = select/10;
++  }
++//  guiUpdate();
++
++  //debounce the button
++  while(btnDown())
++    active_delay(50);
++  active_delay(50);
++
++  checkCAT();
++}
++
+diff --git a/ubitx_v6.1_code/ubitx_v6.1_code.ino b/ubitx_v6.1_code/ubitx_v6.1_code.ino
+new file mode 100644
+index 0000000..6663b8b
+--- /dev/null
++++ b/ubitx_v6.1_code/ubitx_v6.1_code.ino
+@@ -0,0 +1,846 @@
++ /**
++ * This source file is under General Public License version 3.
++ * 
++ * This verision uses a built-in Si5351 library
++ * Most source code are meant to be understood by the compilers and the computers. 
++ * Code that has to be hackable needs to be well understood and properly documented. 
++ * Donald Knuth coined the term Literate Programming to indicate code that is written be 
++ * easily read and understood.
++ * 
++ * The Raduino is a small board that includes the Arduin Nano, a TFT display and
++ * an Si5351a frequency synthesizer. This board is manufactured by HF Signals Electronics Pvt Ltd
++ * 
++ * To learn more about Arduino you may visit www.arduino.cc. 
++ * 
++ * The Arduino works by starts executing the code in a function called setup() and then it 
++ * repeatedly keeps calling loop() forever. All the initialization code is kept in setup()
++ * and code to continuously sense the tuning knob, the function button, transmit/receive,
++ * etc is all in the loop() function. If you wish to study the code top down, then scroll
++ * to the bottom of this file and read your way up.
++ * 
++ * Below are the libraries to be included for building the Raduino 
++ * The EEPROM library is used to store settings like the frequency memory, caliberation data, etc.
++ *
++ *  The main chip which generates upto three oscillators of various frequencies in the
++ *  Raduino is the Si5351a. To learn more about Si5351a you can download the datasheet 
++ *  from www.silabs.com although, strictly speaking it is not a requirment to understand this code. 
++ *  Instead, you can look up the Si5351 library written by xxx, yyy. You can download and 
++ *  install it from www.url.com to complile this file.
++ *  The Wire.h library is used to talk to the Si5351 and we also declare an instance of 
++ *  Si5351 object to control the clocks.
++ */
++#include <Wire.h>
++#include <EEPROM.h>
++#include "ubitx.h"
++#include "nano_gui.h"
++
++/**
++    The main chip which generates upto three oscillators of various frequencies in the
++    Raduino is the Si5351a. To learn more about Si5351a you can download the datasheet
++    from www.silabs.com although, strictly speaking it is not a requirment to understand this code.
++
++    We no longer use the standard SI5351 library because of its huge overhead due to many unused
++    features consuming a lot of program space. Instead of depending on an external library we now use
++    Jerry Gaffke's, KE7ER, lightweight standalone mimimalist "si5351bx" routines (see further down the
++    code). Here are some defines and declarations used by Jerry's routines:
++*/
++
++
++/**
++ * We need to carefully pick assignment of pin for various purposes.
++ * There are two sets of completely programmable pins on the Raduino.
++ * First, on the top of the board, in line with the LCD connector is an 8-pin connector
++ * that is largely meant for analog inputs and front-panel control. It has a regulated 5v output,
++ * ground and six pins. Each of these six pins can be individually programmed 
++ * either as an analog input, a digital input or a digital output. 
++ * The pins are assigned as follows (left to right, display facing you): 
++ *      Pin 1 (Violet), A7, SPARE
++ *      Pin 2 (Blue),   A6, KEYER (DATA)
++ *      Pin 3 (Green), +5v 
++ *      Pin 4 (Yellow), Gnd
++ *      Pin 5 (Orange), A3, PTT
++ *      Pin 6 (Red),    A2, F BUTTON
++ *      Pin 7 (Brown),  A1, ENC B
++ *      Pin 8 (Black),  A0, ENC A
++ *Note: A5, A4 are wired to the Si5351 as I2C interface 
++ *       *     
++ * Though, this can be assigned anyway, for this application of the Arduino, we will make the following
++ * assignment
++ * A2 will connect to the PTT line, which is the usually a part of the mic connector
++ * A3 is connected to a push button that can momentarily ground this line. This will be used for RIT/Bandswitching, etc.
++ * A6 is to implement a keyer, it is reserved and not yet implemented
++ * A7 is connected to a center pin of good quality 100K or 10K linear potentiometer with the two other ends connected to
++ * ground and +5v lines available on the connector. This implments the tuning mechanism
++ */
++
++#define ENC_A (A0)
++#define ENC_B (A1)
++#define FBUTTON (A2)
++#define PTT   (A3)
++#define ANALOG_KEYER (A6)
++#define ANALOG_SPARE (A7)
++
++
++/** pin assignments
++14  T_IRQ           2 std   changed
++13  T_DOUT              (parallel to SOD/MOSI, pin 9 of display)
++12  T_DIN               (parallel to SDI/MISO, pin 6 of display)
++11  T_CS            9   (we need to specify this)
++10  T_CLK               (parallel to SCK, pin 7 of display)
++9   SDO(MSIO) 12    12  (spi)
++8   LED       A0    8   (not needed, permanently on +3.3v) (resistor from 5v, 
++7   SCK       13    13  (spi)
++6   SDI       11    11  (spi)
++5   D/C       A3    7   (changable)
++4   RESET     A4    9 (not needed, permanently +5v)
++3   CS        A5    10  (changable)
++2   GND       GND
++1   VCC       VCC
++
++The model is called tjctm24028-spi
++it uses an ILI9341 display controller and an  XPT2046 touch controller.
++*/
++
++#define TFT_DC  9
++#define TFT_CS 10
++
++//#define TIRQ_PIN  2
++#define CS_PIN  8
++
++// MOSI=11, MISO=12, SCK=13
++
++//XPT2046_Touchscreen ts(CS_PIN);
++
++//Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
++
++/**
++ * The Arduino, unlike C/C++ on a regular computer with gigabytes of RAM, has very little memory.
++ * We have to be very careful with variables that are declared inside the functions as they are 
++ * created in a memory region called the stack. The stack has just a few bytes of space on the Arduino
++ * if you declare large strings inside functions, they can easily exceed the capacity of the stack
++ * and mess up your programs. 
++ * We circumvent this by declaring a few global buffers as  kitchen counters where we can 
++ * slice and dice our strings. These strings are mostly used to control the display or handle
++ * the input and output from the USB port. We must keep a count of the bytes used while reading
++ * the serial port as we can easily run out of buffer space. This is done in the serial_in_count variable.
++ */
++char c[30], b[30];      
++char printBuff[2][20];  //mirrors what is showing on the two lines of the display
++int count = 0;          //to generally count ticks, loops, etc
++
++/** 
++ *  The second set of 16 pins on the Raduino's bottom connector are have the three clock outputs and the digital lines to control the rig.
++ *  This assignment is as follows :
++ *    Pin   1   2    3    4    5    6    7    8    9    10   11   12   13   14   15   16
++ *         GND +5V CLK0  GND  GND  CLK1 GND  GND  CLK2  GND  D2   D3   D4   D5   D6   D7  
++ *  These too are flexible with what you may do with them, for the Raduino, we use them to :
++ *  - TX_RX line : Switches between Transmit and Receive after sensing the PTT or the morse keyer
++ *  - CW_KEY line : turns on the carrier for CW
++ */
++
++#define TX_RX (7)
++#define CW_TONE (6)
++#define TX_LPF_A (5)
++#define TX_LPF_B (4)
++#define TX_LPF_C (3)
++#define CW_KEY (2)
++
++/**
++ * These are the indices where these user changable settinngs are stored  in the EEPROM
++ */
++#define MASTER_CAL 0
++#define LSB_CAL 4
++#define USB_CAL 8
++#define SIDE_TONE 12
++//these are ids of the vfos as well as their offset into the eeprom storage, don't change these 'magic' values
++#define VFO_A 16
++#define VFO_B 20
++#define CW_SIDETONE 24
++#define CW_SPEED 28
++// the screen calibration parameters : int slope_x=104, slope_y=137, offset_x=28, offset_y=29;
++#define SLOPE_X 32
++#define SLOPE_Y 36
++#define OFFSET_X 40
++#define OFFSET_Y 44
++#define CW_DELAYTIME 48
++
++//These are defines for the new features back-ported from KD8CEC's software
++//these start from beyond 256 as Ian, KD8CEC has kept the first 256 bytes free for the base version
++#define VFO_A_MODE  256 // 2: LSB, 3: USB
++#define VFO_B_MODE  257
++
++//values that are stroed for the VFO modes
++#define VFO_MODE_LSB 2
++#define VFO_MODE_USB 3
++
++// handkey, iambic a, iambic b : 0,1,2f
++#define CW_KEY_TYPE 358
++
++/**
++ * The uBITX is an upconnversion transceiver. The first IF is at 45 MHz.
++ * The first IF frequency is not exactly at 45 Mhz but about 5 khz lower,
++ * this shift is due to the loading on the 45 Mhz crystal filter by the matching
++ * L-network used on it's either sides.
++ * The first oscillator works between 48 Mhz and 75 MHz. The signal is subtracted
++ * from the first oscillator to arriive at 45 Mhz IF. Thus, it is inverted : LSB becomes USB
++ * and USB becomes LSB.
++ * The second IF of 12 Mhz has a ladder crystal filter. If a second oscillator is used at 
++ * 57 Mhz, the signal is subtracted FROM the oscillator, inverting a second time, and arrives 
++ * at the 12 Mhz ladder filter thus doouble inversion, keeps the sidebands as they originally were.
++ * If the second oscillator is at 33 Mhz, the oscilaltor is subtracated from the signal, 
++ * thus keeping the signal's sidebands inverted. The USB will become LSB.
++ * We use this technique to switch sidebands. This is to avoid placing the lsbCarrier close to
++ * 12 MHz where its fifth harmonic beats with the arduino's 16 Mhz oscillator's fourth harmonic
++ */
++
++ 
++//#define INIT_USB_FREQ   (11059200l)
++#define INIT_USB_FREQ   (11056900l) //GPB.20200321A
++// limits the tuning and working range of the ubitx between 3 MHz and 30 MHz
++#define LOWEST_FREQ   (100000l)
++#define HIGHEST_FREQ (30000000l)
++
++//we directly generate the CW by programmin the Si5351 to the cw tx frequency, hence, both are different modes
++//these are the parameter passed to startTx
++#define TX_SSB 0
++#define TX_CW 1
++
++char ritOn = 0;
++char vfoActive = VFO_A;
++int8_t meter_reading = 0; // a -1 on meter makes it invisible
++//unsigned long vfoA=7150000L, vfoB=14200000L, sideTone=800, usbCarrier;
++unsigned long vfoA=7050000L, vfoB=14200000L, sideTone=800, usbCarrier; //GBP.20200321A
++char isUsbVfoA=0, isUsbVfoB=1;
++unsigned long frequency, ritRxFrequency, ritTxFrequency;  //frequency is the current frequency on the dial
++unsigned long firstIF =   45005000L;
++
++// if cwMode is flipped on, the rx frequency is tuned down by sidetone hz instead of being zerobeat
++int cwMode = 0;
++
++
++//these are variables that control the keyer behaviour
++int cwSpeed = 100; //this is actuall the dot period in milliseconds
++extern int32_t calibration;
++int cwDelayTime = 60;
++bool Iambic_Key = true;
++#define IAMBICB 0x10 // 0 for Iambic A, 1 for Iambic B
++unsigned char keyerControl = IAMBICB;
++//during CAT commands, we will freeeze the display until CAT is disengaged
++unsigned char doingCAT = 0;
++
++
++/**
++ * Raduino needs to keep track of current state of the transceiver. These are a few variables that do it
++ */
++boolean txCAT = false;        //turned on if the transmitting due to a CAT command
++char inTx = 0;                //it is set to 1 if in transmit mode (whatever the reason : cw, ptt or cat)
++int splitOn = 0;             //working split, uses VFO B as the transmit frequency
++char keyDown = 0;             //in cw mode, denotes the carrier is being transmitted
++char isUSB = 0;               //upper sideband was selected, this is reset to the default for the 
++                              //frequency when it crosses the frequency border of 10 MHz
++byte menuOn = 0;              //set to 1 when the menu is being displayed, if a menu item sets it to zero, the menu is exited
++unsigned long cwTimeout = 0;  //milliseconds to go before the cw transmit line is released and the radio goes back to rx mode
++unsigned long dbgCount = 0;   //not used now
++unsigned char txFilter = 0;   //which of the four transmit filters are in use
++boolean modeCalibrate = false;//this mode of menus shows extended menus to calibrate the oscillators and choose the proper
++                              //beat frequency
++
++/**
++ * Below are the basic functions that control the uBitx. Understanding the functions before 
++ * you start hacking around
++ */
++
++/**
++ * Our own delay. During any delay, the raduino should still be processing a few times. 
++ */
++
++void active_delay(int delay_by){
++  unsigned long timeStart = millis();
++  while (millis() - timeStart <= (unsigned long)delay_by) {
++    delay(10);
++      //Background Work      
++    checkCAT();
++  }
++}
++
++void saveVFOs(){
++
++  if (vfoActive == VFO_A)
++    EEPROM.put(VFO_A, frequency);
++  else
++    EEPROM.put(VFO_A, vfoA);
++    
++  if (isUsbVfoA)
++    EEPROM.put(VFO_A_MODE, VFO_MODE_USB);
++  else
++    EEPROM.put(VFO_A_MODE, VFO_MODE_LSB);
++
++  if (vfoActive == VFO_B)
++    EEPROM.put(VFO_B, frequency);
++  else
++    EEPROM.put(VFO_B, vfoB);
++    
++  if (isUsbVfoB)
++    EEPROM.put(VFO_B_MODE, VFO_MODE_USB);
++  else 
++    EEPROM.put(VFO_B_MODE, VFO_MODE_LSB);
++}
++
++/**
++ * Select the properly tx harmonic filters
++ * The four harmonic filters use only three relays
++ * the four LPFs cover 30-21 Mhz, 18 - 14 Mhz, 7-10 MHz and 3.5 to 5 Mhz
++ * Briefly, it works like this, 
++ * - When KT1 is OFF, the 'off' position routes the PA output through the 30 MHz LPF
++ * - When KT1 is ON, it routes the PA output to KT2. Which is why you will see that
++ *   the KT1 is on for the three other cases.
++ * - When the KT1 is ON and KT2 is off, the off position of KT2 routes the PA output
++ *   to 18 MHz LPF (That also works for 14 Mhz) 
++ * - When KT1 is On, KT2 is On, it routes the PA output to KT3
++ * - KT3, when switched on selects the 7-10 Mhz filter
++ * - KT3 when switched off selects the 3.5-5 Mhz filter
++ * See the circuit to understand this
++ */
++
++void setTXFilters(unsigned long freq){
++  
++  if (freq > 21000000L){  // the default filter is with 35 MHz cut-off
++    digitalWrite(TX_LPF_A, 0);
++    digitalWrite(TX_LPF_B, 0);
++    digitalWrite(TX_LPF_C, 0);
++  }
++  else if (freq >= 14000000L){ //thrown the KT1 relay on, the 30 MHz LPF is bypassed and the 14-18 MHz LPF is allowd to go through
++    digitalWrite(TX_LPF_A, 1);
++    digitalWrite(TX_LPF_B, 0);
++    digitalWrite(TX_LPF_C, 0);
++  }
++  else if (freq > 7000000L){
++    digitalWrite(TX_LPF_A, 0);
++    digitalWrite(TX_LPF_B, 1);
++    digitalWrite(TX_LPF_C, 0);    
++  }
++  else {
++    digitalWrite(TX_LPF_A, 0);
++    digitalWrite(TX_LPF_B, 0);
++    digitalWrite(TX_LPF_C, 1);    
++  }
++}
++
++
++void setTXFilters_v5(unsigned long freq){
++  
++  if (freq > 21000000L){  // the default filter is with 35 MHz cut-off
++    digitalWrite(TX_LPF_A, 0);
++    digitalWrite(TX_LPF_B, 0);
++    digitalWrite(TX_LPF_C, 0);
++  }
++  else if (freq >= 14000000L){ //thrown the KT1 relay on, the 30 MHz LPF is bypassed and the 14-18 MHz LPF is allowd to go through
++    digitalWrite(TX_LPF_A, 1);
++    digitalWrite(TX_LPF_B, 0);
++    digitalWrite(TX_LPF_C, 0);
++  }
++  else if (freq > 7000000L){
++    digitalWrite(TX_LPF_A, 0);
++    digitalWrite(TX_LPF_B, 1);
++    digitalWrite(TX_LPF_C, 0);    
++  }
++  else {
++    digitalWrite(TX_LPF_A, 0);
++    digitalWrite(TX_LPF_B, 0);
++    digitalWrite(TX_LPF_C, 1);    
++  }
++}
++
++
++/**
++ * This is the most frequently called function that configures the 
++ * radio to a particular frequeny, sideband and sets up the transmit filters
++ * 
++ * The transmit filter relays are powered up only during the tx so they dont
++ * draw any current during rx. 
++ * 
++ * The carrier oscillator of the detector/modulator is permanently fixed at
++ * uppper sideband. The sideband selection is done by placing the second oscillator
++ * either 12 Mhz below or above the 45 Mhz signal thereby inverting the sidebands 
++ * through mixing of the second local oscillator.
++ */
++ 
++void setFrequency(unsigned long f){
++  uint64_t osc_f, firstOscillator, secondOscillator;
++ 
++  setTXFilters(f);
++
++/*
++  if (isUSB){
++    si5351bx_setfreq(2, firstIF  + f);
++    si5351bx_setfreq(1, firstIF + usbCarrier);
++  }
++  else{
++    si5351bx_setfreq(2, firstIF + f);
++    si5351bx_setfreq(1, firstIF - usbCarrier);
++  }
++*/
++  //alternative to reduce the intermod spur
++  if (isUSB){
++    if (cwMode)
++      si5351bx_setfreq(2, firstIF  + f + sideTone);
++    else 
++      si5351bx_setfreq(2, firstIF  + f);
++    si5351bx_setfreq(1, firstIF + usbCarrier);
++  }
++  else{
++    if (cwMode)
++      si5351bx_setfreq(2, firstIF  + f + sideTone);      
++    else 
++      si5351bx_setfreq(2, firstIF + f);
++    si5351bx_setfreq(1, firstIF - usbCarrier);
++  }
++    
++  frequency = f;
++}
++
++/**
++ * startTx is called by the PTT, cw keyer and CAT protocol to
++ * put the uBitx in tx mode. It takes care of rit settings, sideband settings
++ * Note: In cw mode, doesnt key the radio, only puts it in tx mode
++ * CW offest is calculated as lower than the operating frequency when in LSB mode, and vice versa in USB mode
++ */
++ 
++void startTx(byte txMode){
++  unsigned long tx_freq = 0;  
++    
++  digitalWrite(TX_RX, 1);
++  inTx = 1;
++  
++  if (ritOn){
++    //save the current as the rx frequency
++    ritRxFrequency = frequency;
++    setFrequency(ritTxFrequency);
++  }
++  else 
++  {
++    if (splitOn == 1) {
++      if (vfoActive == VFO_B) {
++        vfoActive = VFO_A;
++        isUSB = isUsbVfoA;
++        frequency = vfoA;
++      }
++      else if (vfoActive == VFO_A){
++        vfoActive = VFO_B;
++        frequency = vfoB;
++        isUSB = isUsbVfoB;        
++      }
++    }
++    setFrequency(frequency);
++  }
++
++  if (txMode == TX_CW){
++    digitalWrite(TX_RX, 0);
++
++    //turn off the second local oscillator and the bfo
++    si5351bx_setfreq(0, 0);
++    si5351bx_setfreq(1, 0);
++
++    //shif the first oscillator to the tx frequency directly
++    //the key up and key down will toggle the carrier unbalancing
++    //the exact cw frequency is the tuned frequency + sidetone
++    if (isUSB)
++      si5351bx_setfreq(2, frequency + sideTone);
++    else
++      si5351bx_setfreq(2, frequency - sideTone);
++
++    delay(20);
++    digitalWrite(TX_RX, 1);     
++  }
++  drawTx();
++  //updateDisplay();
++}
++
++void stopTx(){
++  inTx = 0;
++
++  digitalWrite(TX_RX, 0);           //turn off the tx
++  si5351bx_setfreq(0, usbCarrier);  //set back the cardrier oscillator anyway, cw tx switches it off
++
++  if (ritOn)
++    setFrequency(ritRxFrequency);
++  else{
++    if (splitOn == 1) {
++      //vfo Change
++      if (vfoActive == VFO_B){
++        vfoActive = VFO_A;
++        frequency = vfoA;
++        isUSB = isUsbVfoA;        
++      }
++      else if (vfoActive == VFO_A){
++        vfoActive = VFO_B;
++        frequency = vfoB;
++        isUSB = isUsbVfoB;        
++      }
++    }
++    setFrequency(frequency);
++  }
++  //updateDisplay();
++  drawTx();
++}
++
++/**
++ * ritEnable is called with a frequency parameter that determines
++ * what the tx frequency will be
++ */
++void ritEnable(unsigned long f){
++  ritOn = 1;
++  //save the non-rit frequency back into the VFO memory
++  //as RIT is a temporary shift, this is not saved to EEPROM
++  ritTxFrequency = f;
++}
++
++// this is called by the RIT menu routine
++void ritDisable(){
++  if (ritOn){
++    ritOn = 0;
++    setFrequency(ritTxFrequency);
++    updateDisplay();
++  }
++}
++
++/**
++ * Basic User Interface Routines. These check the front panel for any activity
++ */
++
++/**
++ * The PTT is checked only if we are not already in a cw transmit session
++ * If the PTT is pressed, we shift to the ritbase if the rit was on
++ * flip the T/R line to T and update the display to denote transmission
++ */
++
++void checkPTT(){	
++  //we don't check for ptt when transmitting cw
++  if (cwTimeout > 0)
++    return;
++    
++  if (digitalRead(PTT) == 0 && inTx == 0){
++    startTx(TX_SSB);
++    active_delay(50); //debounce the PTT
++  }
++	
++  if (digitalRead(PTT) == 1 && inTx == 1)
++    stopTx();
++}
++
++//check if the encoder button was pressed
++void checkButton(){
++  int i, t1, t2, knob, new_knob;
++  
++  //only if the button is pressed
++  if (!btnDown())
++    return;
++  active_delay(50);
++  if (!btnDown()) //debounce
++    return;
++
++  //disengage any CAT work
++  doingCAT = 0;
++
++ int downTime = 0;
++ while(btnDown()){
++    active_delay(10);
++    downTime++;
++    if (downTime > 300){
++      doSetup2();
++      return;
++    }
++ }
++ active_delay(100);
++
++ 
++  doCommands();
++  //wait for the button to go up again
++  while(btnDown())
++    active_delay(10);
++  active_delay(50);//debounce
++}
++
++void switchVFO(int vfoSelect){
++     if (vfoSelect == VFO_A){
++      if (vfoActive == VFO_B){
++        vfoB = frequency;
++        isUsbVfoB = isUSB;
++        EEPROM.put(VFO_B, frequency);
++        if (isUsbVfoB)
++          EEPROM.put(VFO_B_MODE, VFO_MODE_USB);
++        else
++          EEPROM.put(VFO_B_MODE, VFO_MODE_LSB);
++      }
++      vfoActive = VFO_A;
++//      printLine2("Selected VFO A  ");
++      frequency = vfoA;
++      isUSB = isUsbVfoA;
++    }
++    else {
++      if (vfoActive == VFO_A){
++        vfoA = frequency;
++        isUsbVfoA = isUSB;
++        EEPROM.put(VFO_A, frequency);
++        if (isUsbVfoA)
++          EEPROM.put(VFO_A_MODE, VFO_MODE_USB);
++        else
++          EEPROM.put(VFO_A_MODE, VFO_MODE_LSB);
++      }
++      vfoActive = VFO_B;
++//      printLine2("Selected VFO B  ");      
++      frequency = vfoB;
++      isUSB = isUsbVfoB;
++    }
++
++    setFrequency(frequency);
++    redrawVFOs();
++    saveVFOs();
++}
++
++/**
++ * The tuning jumps by 50 Hz on each step when you tune slowly
++ * As you spin the encoder faster, the jump size also increases 
++ * This way, you can quickly move to another band by just spinning the 
++ * tuning knob
++ */
++
++void doTuning(){
++  int s;
++  static unsigned long prev_freq;
++  static unsigned long nextFrequencyUpdate = 0;
++
++  unsigned long now = millis();
++  
++  if (now >= nextFrequencyUpdate && prev_freq != frequency){
++    updateDisplay();
++    nextFrequencyUpdate = now + 300; //GPB.20200321A from 500
++    prev_freq = frequency;
++  }
++
++  s = enc_read();
++  if (!s)
++    return;
++
++  doingCAT = 0; // go back to manual mode if you were doing CAT
++  prev_freq = frequency;
++
++
++  if (s > 10)
++    frequency += 200l * s;
++  else if (s > 5)
++    frequency += 100l * s;
++  else if (s > 0)
++    frequency += 50l * s;
++  else if (s < -10)
++    frequency += 200l * s;
++  else if (s < -5)
++    frequency += 100l * s;
++  else if (s  < 0)
++    frequency += 50l * s;
++   
++  if (prev_freq < 10000000l && frequency > 10000000l)
++    isUSB = true;
++    
++  if (prev_freq > 10000000l && frequency < 10000000l)
++    isUSB = false;
++
++  setFrequency(frequency);    
++}
++
++
++/**
++ * RIT only steps back and forth by 100 hz at a time
++ */
++void doRIT(){
++  unsigned long newFreq;
++ 
++  int knob = enc_read();
++  unsigned long old_freq = frequency;
++
++  if (knob < 0)
++    frequency -= 100l;
++  else if (knob > 0)
++    frequency += 100;
++ 
++  if (old_freq != frequency){
++    setFrequency(frequency);
++    updateDisplay();
++  }
++}
++
++/**
++ * The settings are read from EEPROM. The first time around, the values may not be 
++ * present or out of range, in this case, some intelligent defaults are copied into the 
++ * variables.
++ */
++void initSettings(){
++  byte x;
++  //read the settings from the eeprom and restore them
++  //if the readings are off, then set defaults
++  EEPROM.get(MASTER_CAL, calibration);
++  EEPROM.get(USB_CAL, usbCarrier);
++  EEPROM.get(VFO_A, vfoA);
++  EEPROM.get(VFO_B, vfoB);
++  EEPROM.get(CW_SIDETONE, sideTone);
++  EEPROM.get(CW_SPEED, cwSpeed);
++  EEPROM.get(CW_DELAYTIME, cwDelayTime);
++  
++// the screen calibration parameters : int slope_x=104, slope_y=137, offset_x=28, offset_y=29;
++  
++  if (usbCarrier > 11060000l || usbCarrier < 11048000l)
++    usbCarrier = 11052000l;
++  if (vfoA > 35000000l || 3500000l > vfoA)
++     vfoA = 7050000l; //vfoA = 7150000l; //GPB.20200321A
++  if (vfoB > 35000000l || 3500000l > vfoB)
++     vfoB = 14150000l;  
++  if (sideTone < 100 || 2000 < sideTone) 
++    sideTone = 800;
++  if (cwSpeed < 10 || 1000 < cwSpeed) 
++    cwSpeed = 100;
++  if (cwDelayTime < 10 || cwDelayTime > 100)
++    cwDelayTime = 50;
++
++  /*
++   * The VFO modes are read in as either 2 (USB) or 3(LSB), 0, the default
++   * is taken as 'uninitialized
++   */
++
++  EEPROM.get(VFO_A_MODE, x);
++ 
++  switch(x){
++    case VFO_MODE_USB:
++      isUsbVfoA = 1;
++      break;
++    case VFO_MODE_LSB:
++      isUsbVfoA = 0;
++      break;
++    default:
++      if (vfoA > 10000000l)
++        isUsbVfoA = 1;
++      else 
++        isUsbVfoA = 0;      
++  }
++
++  EEPROM.get(VFO_B_MODE, x);
++  switch(x){
++    case VFO_MODE_USB:
++      isUsbVfoB = 1;
++      break;
++    case VFO_MODE_LSB:
++      isUsbVfoB = 0;
++      break;
++    default:
++      if (vfoA > 10000000l)
++        isUsbVfoB = 1;
++      else 
++        isUsbVfoB = 0;      
++  }
++
++  //set the current mode
++  isUSB = isUsbVfoA;
++
++  /*
++   * The keyer type splits into two variables
++   */
++   EEPROM.get(CW_KEY_TYPE, x);
++
++   if (x == 0)
++    Iambic_Key = false;
++  else if (x == 1){
++    Iambic_Key = true;
++    keyerControl &= ~IAMBICB;
++  }
++  else if (x == 2){
++    Iambic_Key = true;
++    keyerControl |= IAMBICB;
++  }
++  
++}
++
++void initPorts(){
++
++  analogReference(DEFAULT);
++
++  //??
++  pinMode(ENC_A, INPUT_PULLUP);
++  pinMode(ENC_B, INPUT_PULLUP);
++  pinMode(FBUTTON, INPUT_PULLUP);
++  
++  //configure the function button to use the external pull-up
++//  pinMode(FBUTTON, INPUT);
++//  digitalWrite(FBUTTON, HIGH);
++
++  pinMode(PTT, INPUT_PULLUP);
++//  pinMode(ANALOG_KEYER, INPUT_PULLUP);
++
++  pinMode(CW_TONE, OUTPUT);  
++  digitalWrite(CW_TONE, 0);
++  
++  pinMode(TX_RX,OUTPUT);
++  digitalWrite(TX_RX, 0);
++
++  pinMode(TX_LPF_A, OUTPUT);
++  pinMode(TX_LPF_B, OUTPUT);
++  pinMode(TX_LPF_C, OUTPUT);
++  digitalWrite(TX_LPF_A, 0);
++  digitalWrite(TX_LPF_B, 0);
++  digitalWrite(TX_LPF_C, 0);
++
++  pinMode(CW_KEY, OUTPUT);
++  digitalWrite(CW_KEY, 0);
++}
++
++void setup()
++{
++  Serial.begin(38400);
++  Serial.flush();  
++
++  displayInit();
++  initSettings();
++  initPorts();     
++  initOscillators();
++  frequency = vfoA;
++  setFrequency(vfoA);
++  enc_setup();
++
++  if (btnDown()){
++    setupTouch();
++    isUSB = 1;
++    setFrequency(10000000l);
++    setupFreq();
++    isUSB = 0;
++    setFrequency(7100000l);
++    setupBFO();
++  }
++  guiUpdate();
++  displayRawText("v6.1", 270, 210, DISPLAY_LIGHTGREY, DISPLAY_NAVY);
++}
++
++
++/**
++ * The loop checks for keydown, ptt, function button and tuning.
++ */
++
++byte flasher = 0;
++boolean wastouched = false;
++
++void loop(){ 
++
++  if (cwMode)
++    cwKeyer(); 
++  else if (!txCAT)
++    checkPTT();
++    
++  checkButton();
++  //tune only when not tranmsitting 
++  if (!inTx){
++    if (ritOn)
++      doRIT();
++    else 
++      doTuning();
++    checkTouch();
++  }
++
++  checkCAT();
++}
+-- 
+2.22.0.windows.1
+
