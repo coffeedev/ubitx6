@@ -122,7 +122,7 @@ extern int count;          //to generally count ticks, loops, etc
  * We use this technique to switch sidebands. This is to avoid placing the lsbCarrier close to
  * 11 MHz where its fifth harmonic beats with the arduino's 16 Mhz oscillator's fourth harmonic
  */
-#define VU3GWN_VER "VU3GWN v1"
+#define VU3GWN_VER "VU3GWN v1.1"
 #define INIT_USB_FREQ   (11059200l)
 // limits the tuning and working range of the ubitx between 3 MHz and 30 MHz
 #define LOWEST_FREQ   (100000l)
@@ -202,6 +202,8 @@ int getValueByKnob(int minimum, int maximum, int step_size,  int initial, char* 
 void doSetup2(); //main setup function, displays the setup menu, calls various dialog boxes
 void setupBFO();
 void setupFreq();
+void _drawTX() ;
+void _drawRX() ;
 
 
 

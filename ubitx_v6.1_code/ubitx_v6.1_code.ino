@@ -844,6 +844,7 @@ void loop(){
     else 
       doTuning();
     checkTouch();
+    //_drawRX() ;
   }
 
   checkCAT();

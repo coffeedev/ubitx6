@@ -105,12 +105,12 @@ void formatFreq(long f, char *buff) {
 
 void drawCommandbar(char *text){
   displayFillrect(60, 40, 280, 32, DISPLAY_NAVY);
-  displayRawText(text, 60, 45, DISPLAY_WHITE, DISPLAY_NAVY);
+  displayRawText(text, 60, 45, DISPLAY_ORANGE, DISPLAY_NAVY);
 }
 
 void displayVersion()
 {
-  displayRawText(VU3GWN_VER, 180, 210, DISPLAY_LIGHTGREY, DISPLAY_NAVY);
+  displayRawText(VU3GWN_VER, 160, 210, DISPLAY_LIGHTGREY, DISPLAY_NAVY);
 }
 
 /** A generic control to read variable values
@@ -145,7 +145,7 @@ int getValueByKnob(int minimum, int maximum, int step_size,  int initial, char* 
         itoa(knob_value, c, 10);
         strcat(b, c);
         strcat(b, postfix);
-        drawCommandbar(b);
+        //drawCommandbar(b);
       }
       checkCAT();
     }
@@ -198,11 +198,11 @@ void displayVFO(int vfo){
       strcpy(c, "A:");
     if (vfoActive == VFO_A){
       formatFreq(frequency, c+2);
-      displayColor = DISPLAY_WHITE;
+      displayColor = DISPLAY_ORANGE;
       displayBorder = DISPLAY_BLACK;
     }else{
       formatFreq(vfoA, c+2);
-      displayColor = DISPLAY_GREEN;
+      displayColor = DISPLAY_LIGHTGREY;
       displayBorder = DISPLAY_BLACK;      
     }
   }
@@ -220,21 +220,22 @@ void displayVFO(int vfo){
       strcpy(c, "B:");
     if (vfoActive == VFO_B){
       formatFreq(frequency, c+2);
-      displayColor = DISPLAY_WHITE;
-      displayBorder = DISPLAY_WHITE;
-    } else {
-      displayColor = DISPLAY_GREENYELLOW;
+      displayColor = DISPLAY_ORANGE;
       displayBorder = DISPLAY_BLACK;
+    } else {
       formatFreq(vfoB, c+2);
+      displayColor = DISPLAY_LIGHTGREY;
+      displayBorder = DISPLAY_BLACK;
     }
   }
+ 
 
   if (vfoDisplay[0] == 0){
     displayFillrect(b.x, b.y, b.w, b.h, DISPLAY_BLACK);
     if (vfoActive == vfo)
-      displayRect(b.x, b.y, b.w , b.h, DISPLAY_WHITE);
+      displayRect(b.x, b.y, b.w , b.h, DISPLAY_ORANGE);
     else
-      displayRect(b.x, b.y, b.w , b.h, DISPLAY_NAVY);
+      displayRect(b.x, b.y, b.w , b.h, DISPLAY_OLIVE);
   }  
   x = b.x + 6;
   y = b.y + 3;
@@ -300,6 +301,20 @@ void displayRIT(){
   }
 }
 
+void _drawRX()
+{
+  //displayText("RX", 200, 42, 37, 28, DISPLAY_BLACK, DISPLAY_GREEN, DISPLAY_BLUE);
+  displayText("RX", 210, 42, 37, 28, DISPLAY_GREEN, DISPLAY_NAVY, DISPLAY_NAVY);
+  displayFillrect(250, 42, 37, 28, DISPLAY_NAVY);
+}
+
+void _drawTX()
+{
+  //displayText("TX", 250, 42, 37, 28, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_BLUE);
+  displayText("TX", 250, 42, 37, 28, DISPLAY_ORANGE, DISPLAY_NAVY, DISPLAY_NAVY);
+  displayFillrect(210, 42, 37, 28, DISPLAY_NAVY); 
+}
+
 void fastTune(){
   int encoder;
 
@@ -308,14 +323,14 @@ void fastTune(){
     active_delay(50);
   active_delay(300);
   
-  displayRawText("Fast Tuning mode", 60, 45, DISPLAY_YELLOW, DISPLAY_NAVY);
+  displayRawText("Fast Tuning", 30, 50, DISPLAY_YELLOW, DISPLAY_NAVY);
   while(1){
     checkCAT();
 
     //exit after debouncing the btnDown
     if (btnDown()){
-      displayFillrect(50, 45, 220, 30, DISPLAY_NAVY);
-
+      displayFillrect(30, 45, 190, 30, DISPLAY_NAVY);
+      _drawRX() ;
       //wait until the button is realsed and then return
       while(btnDown())
         active_delay(50);
@@ -411,26 +426,35 @@ void enterFreq(){
 
 void drawCWStatus(){
   displayFillrect(0, 201, 320, 39, DISPLAY_NAVY);
-  strcpy(b, " CW:");
+  //strcpy(b, " cw:");
   int wpm = 1200/cwSpeed;    
   itoa(wpm,c, 10);
+  strcat(c,":") ;
+  strcpy(b," ") ;
   strcat(b, c);
-  strcat(b, " w/m");
+  //strcat(b, " w/m");
   //strcat(b, "wpm, ");
-  //itoa(sideTone, c, 10);
-  //strcat(b, c);
+  itoa(sideTone, c, 10);
+  strcat(b, c);
   //strcat(b, "hz");
-  displayRawText(b, 0, 210, DISPLAY_YELLOW, DISPLAY_NAVY);  
+  displayRawText(b, 0, 210, DISPLAY_LIGHTGREY, DISPLAY_NAVY);  
 }
 
 
-void drawTx(){
+void drawTx()
+{
   if (inTx)
-    displayText("TX", 250, 42, 37, 28, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_BLUE);  
+  {
+    _drawTX() ;
+  }
   else
-    //displayText("RX", 250, 42, 37, 28, DISPLAY_BLACK, DISPLAY_GREEN, DISPLAY_BLUE);
-    displayFillrect(250, 42, 37, 28, DISPLAY_NAVY);
+  {
+    _drawRX() ;
+  }
 }
+
+
+
 void drawStatusbar(){
   drawCWStatus();
   displayVersion() ;
@@ -464,7 +488,8 @@ void guiUpdate(){
     checkCAT();
   }
   drawStatusbar();
-  checkCAT();  
+  checkCAT();
+  drawTx() ;
 }
 
 
@@ -803,9 +828,9 @@ int btnDown(){
 }
 
 
-void drawFocus(int ibtn, int color){
+void drawFocus(int ibtn, int color)
+{
   struct Button b;
-
   memcpy_P(&b, btn_set + ibtn, sizeof(struct Button));
   displayRect(b.x, b.y, b.w, b.h, color);
 }
@@ -831,11 +856,11 @@ void doCommands(){
       doCommand(&b);
 
       //unfocus the buttons
-      drawFocus(select, DISPLAY_BLUE);
+      //drawFocus(select, DISPLAY_BLUE);
       if (vfoActive == VFO_A)
-        drawFocus(0, DISPLAY_WHITE);
+        drawFocus(0, DISPLAY_ORANGE);
       else
-        drawFocus(1, DISPLAY_WHITE);
+        drawFocus(1, DISPLAY_ORANGE);
         
       //wait for the button to be up and debounce
       while(btnDown())
