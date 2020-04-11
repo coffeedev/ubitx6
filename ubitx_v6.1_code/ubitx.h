@@ -121,8 +121,14 @@ extern int count;          //to generally count ticks, loops, etc
  * thus keeping the signal's sidebands inverted. The USB will become LSB.
  * We use this technique to switch sidebands. This is to avoid placing the lsbCarrier close to
  * 11 MHz where its fifth harmonic beats with the arduino's 16 Mhz oscillator's fourth harmonic
+ * 
+ * Code additions by vu3gwn@outlook.com
+ * v1.0 - UI fixes, CALLSIGN addition
+ * v1.1 - Button text normalization, VFO A/B UI
+ * v1.2 - Added RX and Current values to Frequency and BFO calibration
+ * 
  */
-#define VU3GWN_VER "VU3GWN v1.1"
+#define VU3GWN_VER "VU3GWN v1.2"
 #define INIT_USB_FREQ   (11059200l)
 // limits the tuning and working range of the ubitx between 3 MHz and 30 MHz
 #define LOWEST_FREQ   (100000l)
@@ -210,6 +216,7 @@ void _drawRX() ;
 //displays a nice dialog box with a title and instructions as footnotes
 void displayDialog(char *title, char *instructions);
 void printCarrierFreq(unsigned long freq); //used to display the frequency in the command area (ex: fast tuning)
+void printCurrentCarrierFreq(unsigned long freq); //used to print current BFO value in the BFO config screen //GPB.20200411A
 
 void enc_setup(void);
 int enc_read(void);

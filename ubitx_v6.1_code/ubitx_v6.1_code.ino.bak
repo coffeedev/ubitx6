@@ -195,6 +195,7 @@ int count = 0;          //to generally count ticks, loops, etc
 
  
 #define INIT_USB_FREQ   (11059200l)
+//#define INIT_USB_FREQ   (11056900l) //GPB.20200321A
 // limits the tuning and working range of the ubitx between 3 MHz and 30 MHz
 #define LOWEST_FREQ   (100000l)
 #define HIGHEST_FREQ (30000000l)
@@ -452,7 +453,7 @@ void startTx(byte txMode){
     digitalWrite(TX_RX, 1);     
   }
   drawTx();
-  //updateDisplay();
+  //updateDisplay(); //GPB.20200322A //Un-Commented
 }
 
 void stopTx(){
@@ -693,7 +694,7 @@ void initSettings(){
   if (usbCarrier > 11060000l || usbCarrier < 11048000l)
     usbCarrier = 11052000l;
   if (vfoA > 35000000l || 3500000l > vfoA)
-     vfoA = 7150000l;
+     vfoA = 7050000l; //vfoA = 7150000l; //GPB.20200321A
   if (vfoB > 35000000l || 3500000l > vfoB)
      vfoB = 14150000l;  
   if (sideTone < 100 || 2000 < sideTone) 
@@ -844,6 +845,7 @@ void loop(){
     else 
       doTuning();
     checkTouch();
+    //_drawRX() ;
   }
 
   checkCAT();

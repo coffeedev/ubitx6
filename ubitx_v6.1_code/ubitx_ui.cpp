@@ -153,6 +153,23 @@ int getValueByKnob(int minimum, int maximum, int step_size,  int initial, char* 
    return knob_value;
 }
 
+//Display Text param : char *text, int x1, int y1, int w, int h, int color, int background, int border
+void printCurrentCarrierFreq(unsigned long freq){
+
+  memset(c, 0, sizeof(c));
+  memset(b, 0, sizeof(b));
+
+  ultoa(freq, b, DEC);
+  
+  strncat(c, b, 2);
+  strcat(c, ".");
+  strncat(c, &b[2], 3);
+  strcat(c, ".");
+  strncat(c, &b[5], 1);
+  displayText(c, 215, 53, 80, 30, DISPLAY_YELLOW, DISPLAY_BLACK, DISPLAY_BLACK);
+  
+}
+
 void printCarrierFreq(unsigned long freq){
 
   memset(c, 0, sizeof(c));
@@ -165,7 +182,7 @@ void printCarrierFreq(unsigned long freq){
   strncat(c, &b[2], 3);
   strcat(c, ".");
   strncat(c, &b[5], 1);
-  displayText(c, 110, 100, 100, 30, DISPLAY_YELLOW, DISPLAY_NAVY, DISPLAY_NAVY);
+  displayText(c, 110, 130, 100, 30, DISPLAY_YELLOW, DISPLAY_BLACK, DISPLAY_WHITE);
 }
 
 void displayDialog(char *title, char *instructions){
@@ -173,8 +190,8 @@ void displayDialog(char *title, char *instructions){
   displayRect(10,10,300,220, DISPLAY_WHITE);
   displayHline(20,45,280,DISPLAY_WHITE);
   displayRect(12,12,296,216, DISPLAY_WHITE);
-  displayRawText(title, 20, 20, DISPLAY_CYAN, DISPLAY_NAVY);
-  displayRawText(instructions, 20, 200, DISPLAY_CYAN, DISPLAY_NAVY);
+  displayRawText(title, 20, 20, DISPLAY_YELLOW, DISPLAY_BLACK);
+  displayRawText(instructions, 20, 200, DISPLAY_YELLOW, DISPLAY_BLACK);
 }
 
 
@@ -709,6 +726,11 @@ void setCwTone(){
   int prev_sideTone;
      
   tone(CW_TONE, sideTone);
+  itoa(sideTone, c, 10);
+  strcpy(b, "CW Tone: ");
+  strcat(b, c);
+  strcat(b, " Hz");
+  drawCommandbar(b);
 
   //disable all clock 1 and clock 2 
   while (digitalRead(PTT) == HIGH && !btnDown())
@@ -739,6 +761,7 @@ void setCwTone(){
 
   displayFillrect(30,41,280, 32, DISPLAY_NAVY);
   drawStatusbar();
+  _drawRX() ;
 //  printLine2("");  
 //  updateDisplay();  
 }

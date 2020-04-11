@@ -29,19 +29,27 @@ void setupFreq(){
   int knob = 0;
   int32_t prev_calibration;
 
-  displayDialog("Set Frequency", "Push TUNE to Save"); 
+  displayDialog("Set Frequency", "Push to Save"); 
 
   //round off the the nearest khz
   frequency = (frequency/1000l)* 1000l;
   setFrequency(frequency);
-  
-  displayRawText("You should have a", 20, 50, DISPLAY_CYAN, DISPLAY_NAVY);
-  displayRawText("signal exactly at ", 20, 75, DISPLAY_CYAN, DISPLAY_NAVY);
-  ltoa(frequency/1000l, c, 10);
-  strcat(c, " KHz");
-  displayRawText(c, 20, 100, DISPLAY_CYAN, DISPLAY_NAVY);
 
-  displayRawText("Rotate to zerobeat", 20, 180, DISPLAY_CYAN, DISPLAY_NAVY);
+  displayRawText("You should have a", 20, 50, DISPLAY_CYAN, DISPLAY_BLACK);
+  ltoa(frequency/1000l, c, 10) ;
+  strcpy(b, "signal exactly at ") ;
+  strcat(b, c) ;
+  strcat(b, " K") ;
+  displayRawText(b, 20, 75, DISPLAY_CYAN, DISPLAY_BLACK);
+    
+  ltoa(calibration, c, 10) ;
+  strcpy(b, "Current is: ") ;
+  strcat(b, c) ;
+  strcat(b, " K") ;
+  displayRawText(b, 20, 100, DISPLAY_CYAN, DISPLAY_BLACK);
+
+  displayRawText("Rotate to zerobeat", 20, 180, DISPLAY_CYAN, DISPLAY_BLACK);
+  
   //keep clear of any previous button press
   while (btnDown())
     active_delay(100);
@@ -65,14 +73,14 @@ void setupFreq(){
     else  
       continue; //don't update the frequency or the display
  
-    si5351bx_setfreq(0, usbCarrier);  //set back the cardrier oscillator anyway, cw tx switches it off  
+    si5351bx_setfreq(0, usbCarrier);  //set back the carrier oscillator anyway, cw tx switches it off  
     si5351_set_calibration(calibration);
     setFrequency(frequency);
 
     //displayRawText("Rotate to zerobeat", 20, 120, DISPLAY_CYAN, DISPLAY_NAVY);
     
     ltoa(calibration, b, 10);
-    displayText(b, 100, 140, 100, 26, DISPLAY_CYAN, DISPLAY_NAVY, DISPLAY_WHITE);
+    displayText(b, 100, 140, 100, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_WHITE);
   }
 
   EEPROM.put(MASTER_CAL, calibration);
@@ -92,12 +100,16 @@ void setupBFO(){
    
   prevCarrier = usbCarrier;
 
-  displayDialog("Set BFO", "Press TUNE to Save"); 
+  displayDialog("Set BFO", "Push to Save"); 
   
-  //usbCarrier = 11053000l;
-  usbCarrier = 11056900l; //GPB.20200321A
+  strcpy(b, "Currently set to: ") ;
+  displayRawText(b, 20, 60, DISPLAY_CYAN, DISPLAY_BLACK);
+  printCurrentCarrierFreq(prevCarrier) ;
+  
+  usbCarrier = 11053000l; 
   si5351bx_setfreq(0, usbCarrier);
   printCarrierFreq(usbCarrier);
+
 
   while (!btnDown()){
     knob = enc_read();
