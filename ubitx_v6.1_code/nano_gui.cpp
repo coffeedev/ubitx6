@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <EEPROM.h>
 #include "ubitx.h"
+#include "ubitx_font.h"
 #include "nano_gui.h"
 
 //#include "Adafruit_GFX.h"
@@ -578,5 +579,3 @@ void setupTouch(){
   writeTouchCalibration();
   displayClear(DISPLAY_BLACK);
 }
-
-

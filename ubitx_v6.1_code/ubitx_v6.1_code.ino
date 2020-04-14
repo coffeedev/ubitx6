@@ -380,14 +380,16 @@ void setFrequency(unsigned long f){
   }
 */
   //alternative to reduce the intermod spur
-  if (isUSB){
+  if (isUSB)
+  {
     if (cwMode)
       si5351bx_setfreq(2, firstIF  + f + sideTone);
     else 
       si5351bx_setfreq(2, firstIF  + f);
     si5351bx_setfreq(1, firstIF + usbCarrier);
   }
-  else{
+  else
+  {
     if (cwMode)
       si5351bx_setfreq(2, firstIF  + f + sideTone);      
     else 
@@ -444,10 +446,13 @@ void startTx(byte txMode){
     //the key up and key down will toggle the carrier unbalancing
     //the exact cw frequency is the tuned frequency + sidetone
     if (isUSB)
-      si5351bx_setfreq(2, frequency + sideTone);
+      tx_freq = (frequency + sideTone);
     else
-      si5351bx_setfreq(2, frequency - sideTone);
+      tx_freq = (frequency - sideTone);
 
+
+    si5351bx_setfreq(2, tx_freq);
+    
     delay(20);
     digitalWrite(TX_RX, 1);     
   }
@@ -547,7 +552,7 @@ void checkButton(){
     downTime++;
     if (downTime > 300){
       doSetup2();
-      displayVersion() ;
+      displayCallSignVer() ;
       return;
     }
  }
@@ -816,7 +821,7 @@ void setup()
     setupBFO();
   }
   guiUpdate();
-  displayVersion() ;
+  displayCallSignVer() ;
 }
 
 

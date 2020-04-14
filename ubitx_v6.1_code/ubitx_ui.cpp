@@ -108,9 +108,9 @@ void drawCommandbar(char *text){
   displayRawText(text, 60, 45, DISPLAY_ORANGE, DISPLAY_NAVY);
 }
 
-void displayVersion()
+void displayCallSignVer()
 {
-  displayRawText(VU3GWN_VER, 160, 210, DISPLAY_LIGHTGREY, DISPLAY_NAVY);
+  displayRawText(CALLSIGN_VER, 160, 210, DISPLAY_LIGHTGREY, DISPLAY_NAVY);
 }
 
 /** A generic control to read variable values
@@ -292,11 +292,11 @@ void btnDraw(struct Button *b){
       (!strcmp(b->text, "USB") && isUSB == 1) || 
       (!strcmp(b->text, "LSB") && isUSB == 0) || 
       (!strcmp(b->text, "SPL") && splitOn == 1))
-    displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_DARKGREY);   
+    displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_OLIVE);   //DISPLAY_DARKGREY
   else if (!strcmp(b->text, "CW") && cwMode == 1)
-      displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_DARKGREY);   
+      displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_OLIVE);   //DISPLAY_DARKGREY
   else
-    displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_GREEN, DISPLAY_BLACK, DISPLAY_DARKGREY);
+    displayText(b->text, b->x, b->y, b->w, b->h, DISPLAY_GREEN, DISPLAY_BLACK, DISPLAY_OLIVE); //DISPLAY_DARKGREY
 }
 
 
@@ -474,7 +474,7 @@ void drawTx()
 
 void drawStatusbar(){
   drawCWStatus();
-  displayVersion() ;
+  displayCallSignVer() ;
 }
 
 void guiUpdate(){

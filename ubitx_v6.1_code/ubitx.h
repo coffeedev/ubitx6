@@ -1,8 +1,13 @@
 
 /* The ubitx is powered by an arduino nano. The pin assignment is as folows 
  *  
+ * Code additions by vu3gwn@outlook.com
+ * v1.0 - UI fixes, CALLSIGN addition
+ * v1.1 - Button text normalization, VFO A/B UI
+ * v1.2 - Added RX and Current values to Frequency and BFO calibration
  */
 
+#define CALLSIGN_VER  "VU3GWN v1.2"
 #define ENC_A (A0)          // Tuning encoder interface
 #define ENC_B (A1)          // Tuning encoder interface
 #define FBUTTON (A2)        // Tuning encoder interface
@@ -122,13 +127,9 @@ extern int count;          //to generally count ticks, loops, etc
  * We use this technique to switch sidebands. This is to avoid placing the lsbCarrier close to
  * 11 MHz where its fifth harmonic beats with the arduino's 16 Mhz oscillator's fourth harmonic
  * 
- * Code additions by vu3gwn@outlook.com
- * v1.0 - UI fixes, CALLSIGN addition
- * v1.1 - Button text normalization, VFO A/B UI
- * v1.2 - Added RX and Current values to Frequency and BFO calibration
  * 
  */
-#define VU3GWN_VER "VU3GWN v1.2"
+
 #define INIT_USB_FREQ   (11059200l)
 // limits the tuning and working range of the ubitx between 3 MHz and 30 MHz
 #define LOWEST_FREQ   (100000l)
@@ -189,7 +190,7 @@ void ritDisable();
 void checkCAT();
 void cwKeyer(void);
 void switchVFO(int vfoSelect);
-void displayVersion() ;
+void displayCallSignVer() ;
 
 int enc_read(void); // returns the number of ticks in a short interval, +ve in clockwise, -ve in anti-clockwise
 int btnDown(); //returns true if the encoder button is pressed
