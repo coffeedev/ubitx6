@@ -5,9 +5,11 @@
  * v1.0 - UI fixes, CALLSIGN addition
  * v1.1 - Button text normalization, VFO A/B UI
  * v1.2 - Added RX and Current values to Frequency and BFO calibration
+ * v1.3 - Fixed RX/TX during RIT, Frequency calibration current value is set now.
+ * v1.4 - Changed CW TX value to frequency. No sideTone added to TX frequency.
  */
 
-#define CALLSIGN_VER  "VU3GWN v1.2"
+#define CALLSIGN_VER  "VU3GWN v1.4"
 #define ENC_A (A0)          // Tuning encoder interface
 #define ENC_B (A1)          // Tuning encoder interface
 #define FBUTTON (A2)        // Tuning encoder interface
@@ -216,8 +218,7 @@ void _drawRX() ;
 
 //displays a nice dialog box with a title and instructions as footnotes
 void displayDialog(char *title, char *instructions);
-void printCarrierFreq(unsigned long freq); //used to display the frequency in the command area (ex: fast tuning)
-void printCurrentCarrierFreq(unsigned long freq); //used to print current BFO value in the BFO config screen //GPB.20200411A
+void printCarrierFreq(unsigned long freq, bool current = false); //used to display the frequency in the command area (ex: fast tuning)
 
 void enc_setup(void);
 int enc_read(void);

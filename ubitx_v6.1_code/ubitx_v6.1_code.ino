@@ -253,9 +253,11 @@ boolean modeCalibrate = false;//this mode of menus shows extended menus to calib
  * Our own delay. During any delay, the raduino should still be processing a few times. 
  */
 
-void active_delay(int delay_by){
+void active_delay(int delay_by)
+{
   unsigned long timeStart = millis();
-  while (millis() - timeStart <= (unsigned long)delay_by) {
+  while (millis() - timeStart <= (unsigned long)delay_by) 
+  {
     delay(10);
       //Background Work      
     checkCAT();
@@ -408,7 +410,7 @@ void setFrequency(unsigned long f){
  */
  
 void startTx(byte txMode){
-  unsigned long tx_freq = 0;  
+  //unsigned long tx_freq = 0;  
     
   digitalWrite(TX_RX, 1);
   inTx = 1;
@@ -445,13 +447,15 @@ void startTx(byte txMode){
     //shif the first oscillator to the tx frequency directly
     //the key up and key down will toggle the carrier unbalancing
     //the exact cw frequency is the tuned frequency + sidetone
-    if (isUSB)
-      tx_freq = (frequency + sideTone);
-    else
-      tx_freq = (frequency - sideTone);
-
-
-    si5351bx_setfreq(2, tx_freq);
+    //GPB.20200410
+    //Removing sideTone addition and subtraction... (+ sideTone for USB, - sideTone for LSB)
+    //if (isUSB)
+    //  tx_freq = (frequency + sideTone);
+    //else
+    //  tx_freq = (frequency - sideTone);
+    
+    //si5351bx_setfreq(2, tx_freq);
+    si5351bx_setfreq(2, frequency);
     
     delay(20);
     digitalWrite(TX_RX, 1);     

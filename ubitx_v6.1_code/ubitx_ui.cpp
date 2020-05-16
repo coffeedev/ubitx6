@@ -153,8 +153,9 @@ int getValueByKnob(int minimum, int maximum, int step_size,  int initial, char* 
    return knob_value;
 }
 
+
 //Display Text param : char *text, int x1, int y1, int w, int h, int color, int background, int border
-void printCurrentCarrierFreq(unsigned long freq){
+void printCarrierFreq(unsigned long freq, bool current){
 
   memset(c, 0, sizeof(c));
   memset(b, 0, sizeof(b));
@@ -166,23 +167,11 @@ void printCurrentCarrierFreq(unsigned long freq){
   strncat(c, &b[2], 3);
   strcat(c, ".");
   strncat(c, &b[5], 1);
-  displayText(c, 215, 53, 80, 30, DISPLAY_YELLOW, DISPLAY_BLACK, DISPLAY_BLACK);
   
-}
-
-void printCarrierFreq(unsigned long freq){
-
-  memset(c, 0, sizeof(c));
-  memset(b, 0, sizeof(b));
-
-  ultoa(freq, b, DEC);
-  
-  strncat(c, b, 2);
-  strcat(c, ".");
-  strncat(c, &b[2], 3);
-  strcat(c, ".");
-  strncat(c, &b[5], 1);
-  displayText(c, 110, 130, 100, 30, DISPLAY_YELLOW, DISPLAY_BLACK, DISPLAY_WHITE);
+  if(current)
+    displayText(c, 215, 53, 80, 30, DISPLAY_YELLOW, DISPLAY_BLACK, DISPLAY_BLACK);
+  else
+    displayText(c, 110, 130, 100, 30, DISPLAY_YELLOW, DISPLAY_BLACK, DISPLAY_WHITE);
 }
 
 void displayDialog(char *title, char *instructions){
@@ -193,9 +182,6 @@ void displayDialog(char *title, char *instructions){
   displayRawText(title, 20, 20, DISPLAY_YELLOW, DISPLAY_BLACK);
   displayRawText(instructions, 20, 200, DISPLAY_YELLOW, DISPLAY_BLACK);
 }
-
-
-
 
 char vfoDisplay[12];
 void displayVFO(int vfo){
@@ -302,34 +288,52 @@ void btnDraw(struct Button *b){
 
 void displayRIT(){
   displayFillrect(0,41,320,30, DISPLAY_NAVY);
-  if (ritOn){
+  if (ritOn)
+  {
     strcpy(c, "TX:");
     formatFreq(ritTxFrequency, c+3);
     if (vfoActive == VFO_A)
-      displayText(c, 0, 45,159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
+      displayText(c, 000, 42, 159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
     else
-      displayText(c, 160, 45,159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);      
+      displayText(c, 160, 42, 159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);      
+  
+    drawTx() ;
   }
-  else {
+  else 
+  {
     if (vfoActive == VFO_A)
-      displayText("", 0, 45,159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
+      displayText("", 000, 42, 159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
     else
-      displayText("", 160, 45,159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
+      displayText("", 160, 42, 159, 30, DISPLAY_WHITE, DISPLAY_NAVY, DISPLAY_NAVY);
+
+    drawTx() ;
   }
 }
 
 void _drawRX()
 {
-  //displayText("RX", 200, 42, 37, 28, DISPLAY_BLACK, DISPLAY_GREEN, DISPLAY_BLUE);
-  displayText("RX", 210, 42, 37, 28, DISPLAY_GREEN, DISPLAY_NAVY, DISPLAY_NAVY);
-  displayFillrect(250, 42, 37, 28, DISPLAY_NAVY);
+  short one, two =  0;
+  if(ritOn && vfoActive == VFO_B)
+    one = 020, two = 070 ;
+  else
+    one = 210, two = 250 ;
+
+  displayText("RX", one, 42, 37, 28, DISPLAY_GREEN, DISPLAY_NAVY, DISPLAY_NAVY);
+    displayFillrect(two, 42, 37, 28, DISPLAY_NAVY);
 }
 
 void _drawTX()
 {
-  //displayText("TX", 250, 42, 37, 28, DISPLAY_BLACK, DISPLAY_ORANGE, DISPLAY_BLUE);
-  displayText("TX", 250, 42, 37, 28, DISPLAY_ORANGE, DISPLAY_NAVY, DISPLAY_NAVY);
-  displayFillrect(210, 42, 37, 28, DISPLAY_NAVY); 
+  short one, two =  0;
+  if(ritOn && vfoActive == VFO_B)
+    two = 020, one = 070 ;
+  else
+    two = 210, one = 250 ;
+    
+ 
+  displayText("TX", one, 42, 37, 28, DISPLAY_ORANGE, DISPLAY_NAVY, DISPLAY_NAVY);
+    displayFillrect(two, 42, 37, 28, DISPLAY_NAVY); 
+  
 }
 
 void fastTune(){
@@ -580,12 +584,17 @@ int enc_read(void) {
 }
 */
 
-void ritToggle(struct Button *b){
-  if (ritOn == 0){
+void ritToggle(struct Button *b)
+{
+  if (ritOn == 0)
+  {
     ritEnable(frequency);
   }
   else
+  {
     ritDisable();
+  }
+  
   btnDraw(b);
   displayRIT();
 }

@@ -56,21 +56,17 @@ void setupFreq(){
   active_delay(100);
    
   prev_calibration = calibration;
-  calibration = 0;
-
-//  ltoa(calibration/8750, c, 10);
-//  strcpy(b, c);
-//  strcat(b, "Hz");
-//  printLine2(b);     
+  //calibration = 0; //GPB_20200417A
+  
+  ltoa(calibration, b, 10);
+  displayText(b, 100, 140, 100, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_WHITE);
 
   while (!btnDown())
   {
    knob = enc_read();
    if (knob != 0)
-      calibration += knob * 875;
- /*   else if (knob < 0)
-      calibration -= 875; */
-    else  
+      calibration += knob * 35 ;// * 875; //GPB_20200417A  //35 is a multiple of 875   
+   else  
       continue; //don't update the frequency or the display
  
     si5351bx_setfreq(0, usbCarrier);  //set back the carrier oscillator anyway, cw tx switches it off  
@@ -80,7 +76,7 @@ void setupFreq(){
     //displayRawText("Rotate to zerobeat", 20, 120, DISPLAY_CYAN, DISPLAY_NAVY);
     
     ltoa(calibration, b, 10);
-    displayText(b, 100, 140, 100, 26, DISPLAY_CYAN, DISPLAY_BLACK, DISPLAY_WHITE);
+    displayText(b, 100, 140, 100, 26, DISPLAY_RED, DISPLAY_BLACK, DISPLAY_WHITE);
   }
 
   EEPROM.put(MASTER_CAL, calibration);
@@ -104,7 +100,7 @@ void setupBFO(){
   
   strcpy(b, "Currently set to: ") ;
   displayRawText(b, 20, 60, DISPLAY_CYAN, DISPLAY_BLACK);
-  printCurrentCarrierFreq(prevCarrier) ;
+  printCarrierFreq(prevCarrier, true) ;
   
   usbCarrier = 11053000l; 
   si5351bx_setfreq(0, usbCarrier);
@@ -253,7 +249,7 @@ void movePuck(int i){
 }
 
 void doSetup2(){
-  int select=0, i,btnState;
+  int select=1, i,btnState;
 
   drawSetupMenu();
   movePuck(select);
