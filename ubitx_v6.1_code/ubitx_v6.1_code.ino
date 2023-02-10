@@ -1,6 +1,10 @@
  /**
  * This source file is under General Public License version 3.
- * 
+ * GPB20230210 
+ *  - Check the Port
+ *  - Set the board to Arduino Nano
+ *  - Set the Processor to ATMEGA328P (Old Bootloader)
+ *  
  * This verision uses a built-in Si5351 library
  * Most source code are meant to be understood by the compilers and the computers. 
  * Code that has to be hackable needs to be well understood and properly documented. 
