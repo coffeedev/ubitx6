@@ -1,5 +1,6 @@
  /**
  * This source file is under General Public License version 3.
+ * VU3GWN
  * GPB20230210 
  *  - Check the Port
  *  - Set the board to Arduino Nano
@@ -212,7 +213,7 @@ char ritOn = 0;
 char vfoActive = VFO_A;
 int8_t meter_reading = 0; // a -1 on meter makes it invisible
 //unsigned long vfoA=7150000L, vfoB=14200000L, sideTone=800, usbCarrier;
-unsigned long vfoA=7050000L, vfoB=14200000L, sideTone=800, usbCarrier; //GBP.20200321A
+unsigned long vfoA=7100000L, vfoB=14200000L, sideTone=800, usbCarrier; //GBP.20200321A
 char isUsbVfoA=0, isUsbVfoB=1;
 unsigned long frequency, ritRxFrequency, ritTxFrequency;  //frequency is the current frequency on the dial
 unsigned long firstIF =   45005000L;

@@ -1,3 +1,4 @@
+//VU3GWN
 #include <Arduino.h>
 #include <Wire.h>
 #include "ubitx.h"
@@ -124,6 +125,3 @@ void initOscillators(){
   si5351bx_vcoa = (SI5351BX_XTAL * SI5351BX_MSA) + calibration; // apply the calibration correction factor
   si5351bx_setfreq(0, usbCarrier);
 }
-
-
-

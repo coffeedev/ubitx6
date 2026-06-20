@@ -1,3 +1,4 @@
+//VU3GWN
 #include <Arduino.h>
 #include <EEPROM.h>
 #include "morse.h"
@@ -102,7 +103,7 @@ void setupBFO(){
   displayRawText(b, 20, 60, DISPLAY_CYAN, DISPLAY_BLACK);
   printCarrierFreq(prevCarrier, true) ;
   
-  usbCarrier = 11053000l; 
+  usbCarrier = 11053000l;
   si5351bx_setfreq(0, usbCarrier);
   printCarrierFreq(usbCarrier);
 
@@ -236,7 +237,8 @@ void drawSetupMenu(){
   displayRawText("CW Delay...", 30, 110, DISPLAY_WHITE, DISPLAY_BLACK);       
   displayRawText("CW Keyer...", 30, 140, DISPLAY_WHITE, DISPLAY_BLACK);       
   displayRawText("Touch Screen...", 30, 170, DISPLAY_WHITE, DISPLAY_BLACK);       
-  displayRawText("Exit", 30, 200, DISPLAY_WHITE, DISPLAY_BLACK);       
+  displayRawText("Exit", 30, 200, DISPLAY_WHITE, DISPLAY_BLACK);
+  //displayRawText("VU3GWN", 30, 230, DISPLAY_WHITE, DISPLAY_BLACK);       
 }
 
 static int prevPuck = -1;

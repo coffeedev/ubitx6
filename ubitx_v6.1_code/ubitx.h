@@ -1,6 +1,7 @@
 
 /* The ubitx is powered by an arduino nano. The pin assignment is as folows 
  *  
+ *  //VU3GWN
  * Code additions by vu3gwn@outlook.com
  * v1.0 - UI fixes, CALLSIGN addition
  * v1.1 - Button text normalization, VFO A/B UI

@@ -1,3 +1,4 @@
+//VU3GWN
 #include <Arduino.h>
 #include "ubitx.h"
 
@@ -288,5 +289,3 @@ void cwKeyer(void){
     } //end of while
   }   //end of elese
 }
-
-
